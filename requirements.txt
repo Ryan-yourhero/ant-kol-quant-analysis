@@ -1,0 +1,19 @@
+# ========================================
+# 蚂蚁财富大V操作数据采集工具 - 依赖清单
+# ========================================
+
+# 基础依赖（标准库无需安装，此处为文档说明）
+# subprocess, re, xml.etree.ElementTree, os, json, csv, logging, argparse, datetime
+
+# 第三方依赖
+# lxml: 高性能XML解析（可选，若xml.etree.ElementTree解析不兼容时启用）
+lxml>=4.9.0
+
+# xmltodict: XML转字典（可选，便于调试XML结构）
+xmltodict>=0.13.0
+
+# click: 优雅的命令行接口（可选，用于增强CLI体验）
+click>=8.0.0
+
+# rich: 终端美化输出（可选，日志和结果展示更友好）
+rich>=13.0.0

@@ -1,0 +1,102 @@
+00:18:42 | INFO    | core.data_extractor | 找到 0 个操作锚点节点
+00:18:42 | INFO    | core.data_extractor | 成功提取 0 条操作记录（去重前 0 条）
+00:18:46 | INFO    | core.data_extractor | 找到 0 个操作锚点节点
+00:18:46 | INFO    | core.data_extractor | 成功提取 0 条操作记录（去重前 0 条）
+00:18:50 | INFO    | core.data_extractor | 找到 0 个操作锚点节点
+00:18:50 | INFO    | core.data_extractor | 成功提取 0 条操作记录（去重前 0 条）
+00:18:54 | INFO    | core.data_extractor | 找到 0 个操作锚点节点
+00:18:54 | INFO    | core.data_extractor | 成功提取 0 条操作记录（去重前 0 条）
+00:19:19 | INFO    | core.data_extractor | 找到 0 个操作锚点节点
+00:19:19 | INFO    | core.data_extractor | 成功提取 0 条操作记录（去重前 0 条）
+00:19:23 | INFO    | core.data_extractor | 找到 0 个操作锚点节点
+00:19:23 | INFO    | core.data_extractor | 成功提取 0 条操作记录（去重前 0 条）
+00:19:28 | INFO    | core.data_extractor | 找到 0 个操作锚点节点
+00:19:28 | INFO    | core.data_extractor | 成功提取 0 条操作记录（去重前 0 条）
+10:18:28 | INFO    | main | 蚂蚁财富大V操作数据采集工具启动
+10:18:28 | INFO    | main | 项目目录: E:\PM\PM\KOL-RICH
+10:18:28 | INFO    | main | 读取本地XML文件: window.xml
+10:18:28 | INFO    | main | ===== 解析XML并提取数据 =====
+10:18:28 | INFO    | main | 页面共包含 0 个含文本的UI节点
+10:18:28 | INFO    | core.data_extractor | 找到 0 个操作锚点节点
+10:18:28 | INFO    | core.data_extractor | 成功提取 0 条操作记录（去重前 0 条）
+10:18:28 | INFO    | excel_exporter | Excel 追加完成 -> E:\PM\PM\KOL-RICH\output\ant_finance_trades.xlsx：trade_records +0, kol_info +0, daily_summary +0, raw_data +0
+10:18:28 | INFO    | main | Excel 追加完成: E:\PM\PM\KOL-RICH\output\ant_finance_trades.xlsx (trade_records +0, raw_data +0, kol_info +0)
+10:18:28 | INFO    | main | 全部流程完成，退出。
+10:43:00 | INFO    | core.data_extractor | 找到 12 个操作锚点节点
+10:43:00 | INFO    | core.data_extractor | 成功提取 0 条操作记录（去重前 5 条）
+10:43:04 | INFO    | core.data_extractor | 找到 12 个操作锚点节点
+10:43:04 | INFO    | core.data_extractor | 成功提取 0 条操作记录（去重前 5 条）
+10:43:08 | INFO    | core.data_extractor | 找到 12 个操作锚点节点
+10:43:08 | INFO    | core.data_extractor | 成功提取 0 条操作记录（去重前 3 条）
+10:43:12 | INFO    | core.data_extractor | 找到 12 个操作锚点节点
+10:43:12 | INFO    | core.data_extractor | 成功提取 0 条操作记录（去重前 4 条）
+10:43:17 | INFO    | core.data_extractor | 找到 12 个操作锚点节点
+10:43:17 | INFO    | core.data_extractor | 成功提取 0 条操作记录（去重前 4 条）
+10:43:21 | INFO    | core.data_extractor | 找到 12 个操作锚点节点
+10:43:21 | INFO    | core.data_extractor | 成功提取 0 条操作记录（去重前 4 条）
+11:39:21 | INFO    | core.data_extractor | 找到 23 个操作锚点节点
+11:39:21 | INFO    | core.data_extractor | 成功提取 0 条操作记录（去重前 14 条）
+11:39:25 | INFO    | core.data_extractor | 找到 23 个操作锚点节点
+11:39:25 | INFO    | core.data_extractor | 成功提取 0 条操作记录（去重前 14 条）
+11:39:29 | INFO    | core.data_extractor | 找到 23 个操作锚点节点
+11:39:29 | INFO    | core.data_extractor | 成功提取 0 条操作记录（去重前 10 条）
+11:39:33 | INFO    | core.data_extractor | 找到 23 个操作锚点节点
+11:39:33 | INFO    | core.data_extractor | 成功提取 0 条操作记录（去重前 7 条）
+11:39:37 | INFO    | core.data_extractor | 找到 23 个操作锚点节点
+11:39:37 | INFO    | core.data_extractor | 成功提取 0 条操作记录（去重前 6 条）
+11:39:41 | INFO    | core.data_extractor | 找到 23 个操作锚点节点
+11:39:41 | INFO    | core.data_extractor | 成功提取 0 条操作记录（去重前 18 条）
+11:39:46 | INFO    | core.data_extractor | 找到 23 个操作锚点节点
+11:39:46 | INFO    | core.data_extractor | 成功提取 0 条操作记录（去重前 19 条）
+11:39:50 | INFO    | core.data_extractor | 找到 23 个操作锚点节点
+11:39:50 | INFO    | core.data_extractor | 成功提取 0 条操作记录（去重前 19 条）
+11:39:54 | INFO    | core.data_extractor | 找到 23 个操作锚点节点
+11:39:54 | INFO    | core.data_extractor | 成功提取 0 条操作记录（去重前 19 条）
+11:39:54 | INFO    | excel_storage | 持久化完成 → E:\PM\PM\KOL-RICH\output\ant_finance_trades.xlsx：trade +0（累计 70），raw_data 累计 4，本次 JSON 解析 0 条记录。
+14:02:21 | INFO    | core.data_extractor | 找到 46 个操作锚点节点
+14:02:21 | INFO    | core.data_extractor | 成功提取 0 条操作记录（去重前 14 条）
+14:02:25 | INFO    | core.data_extractor | 找到 46 个操作锚点节点
+14:02:25 | INFO    | core.data_extractor | 成功提取 0 条操作记录（去重前 14 条）
+14:02:30 | INFO    | core.data_extractor | 找到 46 个操作锚点节点
+14:02:30 | INFO    | core.data_extractor | 成功提取 0 条操作记录（去重前 11 条）
+14:02:34 | INFO    | core.data_extractor | 找到 46 个操作锚点节点
+14:02:34 | INFO    | core.data_extractor | 成功提取 1 条操作记录（去重前 8 条）
+14:02:38 | INFO    | core.data_extractor | 找到 46 个操作锚点节点
+14:02:38 | INFO    | core.data_extractor | 成功提取 1 条操作记录（去重前 24 条）
+14:02:42 | INFO    | core.data_extractor | 找到 46 个操作锚点节点
+14:02:42 | INFO    | core.data_extractor | 成功提取 1 条操作记录（去重前 27 条）
+14:02:47 | INFO    | core.data_extractor | 找到 46 个操作锚点节点
+14:02:47 | INFO    | core.data_extractor | 成功提取 2 条操作记录（去重前 28 条）
+14:02:51 | INFO    | core.data_extractor | 找到 46 个操作锚点节点
+14:02:51 | INFO    | core.data_extractor | 成功提取 0 条操作记录（去重前 26 条）
+14:02:56 | INFO    | core.data_extractor | 找到 46 个操作锚点节点
+14:02:56 | INFO    | core.data_extractor | 成功提取 1 条操作记录（去重前 11 条）
+14:03:00 | INFO    | core.data_extractor | 找到 64 个操作锚点节点
+14:03:00 | INFO    | core.data_extractor | 成功提取 2 条操作记录（去重前 12 条）
+14:03:04 | INFO    | core.data_extractor | 找到 64 个操作锚点节点
+14:03:04 | INFO    | core.data_extractor | 成功提取 1 条操作记录（去重前 8 条）
+14:03:09 | INFO    | core.data_extractor | 找到 64 个操作锚点节点
+14:03:09 | INFO    | core.data_extractor | 成功提取 1 条操作记录（去重前 26 条）
+14:03:13 | INFO    | core.data_extractor | 找到 64 个操作锚点节点
+14:03:13 | INFO    | core.data_extractor | 成功提取 1 条操作记录（去重前 30 条）
+14:03:17 | INFO    | core.data_extractor | 找到 64 个操作锚点节点
+14:03:17 | INFO    | core.data_extractor | 成功提取 1 条操作记录（去重前 27 条）
+14:03:21 | INFO    | core.data_extractor | 找到 64 个操作锚点节点
+14:03:21 | INFO    | core.data_extractor | 成功提取 1 条操作记录（去重前 24 条）
+14:03:26 | INFO    | core.data_extractor | 找到 64 个操作锚点节点
+14:03:26 | INFO    | core.data_extractor | 成功提取 2 条操作记录（去重前 24 条）
+14:03:30 | INFO    | core.data_extractor | 找到 64 个操作锚点节点
+14:03:30 | INFO    | core.data_extractor | 成功提取 2 条操作记录（去重前 24 条）
+14:03:34 | INFO    | core.data_extractor | 找到 64 个操作锚点节点
+14:03:34 | INFO    | core.data_extractor | 成功提取 2 条操作记录（去重前 24 条）
+14:03:34 | WARNING | main | 新版 Excel 持久化失败（JSON 已保存）: [Errno 13] Permission denied: 'e:\\PM\\PM\\KOL-RICH\\output\\ant_finance_trades.xlsx'
+14:19:39 | WARNING | main | 新版 Excel 持久化失败（JSON 已保存）: [Errno 13] Permission denied: 'e:\\PM\\PM\\KOL-RICH\\output\\ant_finance_trades.xlsx'
+14:34:34 | WARNING | main | 新版 Excel 持久化失败（JSON 已保存）: [Errno 13] Permission denied: 'e:\\PM\\PM\\KOL-RICH\\output\\ant_finance_trades.xlsx'
+14:35:43 | WARNING | main | 新版 Excel 持久化失败（JSON 已保存）: [Errno 13] Permission denied: 'e:\\PM\\PM\\KOL-RICH\\output\\ant_finance_trades.xlsx'
+14:49:02 | WARNING | main | 新版 Excel 持久化失败（JSON/MD 已保存）: [Errno 13] Permission denied: 'e:\\PM\\PM\\KOL-RICH\\output\\ant_finance_trades.xlsx'
+14:51:20 | WARNING | main | 新版 Excel 持久化失败（JSON/MD 已保存）: [Errno 13] Permission denied: 'e:\\PM\\PM\\KOL-RICH\\output\\ant_finance_trades.xlsx'
+15:20:43 | WARNING | main | 新版 Excel 持久化失败（JSON/MD 已保存）: [Errno 13] Permission denied: 'e:\\PM\\PM\\KOL-RICH\\output\\ant_finance_trades.xlsx'
+15:49:41 | INFO    | excel_storage | [v2] 持久化完成 → E:\PM\PM\KOL-RICH\output\ant_finance_trades.xlsx：trade_records 未追加（留给 AIParser 阶段），累计 70 行，raw_data +1 行，累计 5 行。
+16:07:41 | INFO    | excel_storage | [v2] 持久化完成 → E:\PM\PM\KOL-RICH\output\ant_finance_trades.xlsx：trade_records 未追加（留给 AIParser 阶段），累计 70 行，raw_data +1 行，累计 6 行。
+16:27:01 | INFO    | excel_storage | [v2] 持久化完成 → E:\PM\PM\KOL-RICH\output\ant_finance_trades.xlsx：trade_records 未追加（留给 AIParser 阶段），累计 70 行，raw_data +1 行，累计 7 行。
+16:58:26 | INFO    | excel_storage | [v2] 持久化完成 → E:\PM\PM\KOL-RICH\output\ant_finance_trades.xlsx：trade_records 未追加（留给 AIParser 阶段），累计 70 行，raw_data +1 行，累计 8 行。
