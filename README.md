@@ -1,8 +1,8 @@
-# 蚂蚁大V量化分析
+# 基金大V量化交易分析
 
-> 蚂蚁财富大V交易行为采集与 AI 分析系统：自动采集每日操作，结构化识别买入 / 卖出 / 定投 / 转换行为，并结合历史数据库分析大V资金变化与方向共识。
+> 基金大V交易行为采集与 AI 分析系统：自动采集每日操作，结构化识别买入 / 卖出 / 定投 / 转换行为，并结合历史数据库分析大V资金变化与方向共识。
 
-**Ant Fortune KOL Trading Tracker & AI Analysis**
+**Fund KOL Quant Trading Analysis**
 
 ---
 
@@ -532,6 +532,14 @@ AI解析问题？
 
 ![今日操作页面（采集起始页）](docs/images/today-operations-page.jpg)
 
+## 屏幕镜像（可选，推荐）
+
+采集过程中建议用开源投屏工具 [scrcpy](https://github.com/Genymobile/scrcpy)（本文环境使用 scrcpy-win64-v4.1）把手机屏幕镜像到电脑，方便实时观察采集是否正常：
+
+- 下载：https://github.com/Genymobile/scrcpy/releases （Windows 用户选 `scrcpy-win64-vX.X.zip`）
+- 作用：scrcpy 只是投屏镜像工具，不参与数据采集；数据采集由 ADB 完成
+- 用法：解压后运行 scrcpy.exe，手机 USB 连接并开启 USB 调试即可
+
 建议在运行前准备：
 
 - Python
@@ -567,3 +575,4 @@ AI解析问题？
 - LLM 金融应用
 - Android 自动化采集
 - 历史行为回测
+
