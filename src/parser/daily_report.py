@@ -206,6 +206,7 @@ DAILY_REPORT_SYSTEM_PROMPT = """一、角色设定
 
 十四、完整输出结构
 ### 一、今日总体判断：[一句话概括市场特征，行情描述需标注来源]
+（开头需注明：今日共采集 X 位大V、Y 条操作记录，具体数字从「今日采集概况」引用）
 ### 二、核心大V操作详解
 [按大V分组，逐笔列出操作+观点摘要；状态标签原样引用 Python 结果]
 ### 三、方向汇总
@@ -300,9 +301,17 @@ def generate_daily_report(
 
     table = records_to_markdown(records)
 
+    # 统计今日参与大V数量（去重）
+    kol_names = {r.kol_name for r in records if r.kol_name}
+    kol_count = len(kol_names)
+
     parts = [
         "以下数据已由前置流程解析成表（每行一笔操作，字段见表头），"
         "请据此直接输出每日复盘分析报告（按「十四、完整输出结构」）。",
+        "",
+        f"## 今日采集概况",
+        f"- 今日参与大V数量：**{kol_count} 位**",
+        f"- 今日操作记录总数：**{len(records)} 条**",
         "",
         "## 今日原始数据表",
         table,
