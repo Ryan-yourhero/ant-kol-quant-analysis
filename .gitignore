@@ -44,6 +44,9 @@ scrcpy.exe.lnk
 对话记录.md
 提示词.md
 
+# ===== 早期开发文档（已废弃）=====
+PROJECT_STATUS.md
+
 # ===== IDE =====
 .trae/
 .idea/
