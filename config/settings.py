@@ -30,6 +30,7 @@ ADB_SERVER_PORT = 5037
 
 # 目标设备序列号（多设备时需指定，None则自动选择唯一在线设备）
 TARGET_DEVICE_SERIAL = os.environ.get("TARGET_DEVICE_SERIAL", None)
+DEVICE_SERIAL = TARGET_DEVICE_SERIAL  # 别名，兼容 pipeline 等调用方
 
 # ADB命令超时时间（秒）
 ADB_TIMEOUT = 30

@@ -41,6 +41,15 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
+# Windows 终端默认 GBK 编码会导致 emoji（✅/❌等）报 UnicodeEncodeError
+# 强制 stdout/stderr 使用 UTF-8
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 from config import settings
 from core.adb_controller import ADBController, ADBError
 from core.xml_parser import UIXmlParser
@@ -509,6 +518,96 @@ def run_scroll_manager_mode():
     if screen_md:
         print(f"   镜像 MD 文件 : {screen_md}")
     print("=" * 60)
+
+    # ====== v3: MD → AI 解析 → Excel ======
+    if screen_md and os.path.exists(screen_md):
+        print("\n" + "-" * 60)
+        print("开始 AI 解析 MD → 生成 Excel ...")
+        try:
+            from src.parser import parse_md_to_excel
+            excel_path, parse_result = parse_md_to_excel(screen_md)
+            if excel_path:
+                print(f"\n✅ Excel 生成完成: {excel_path}")
+                print(f"   记录数: {parse_result.total_records}")
+                print(f"   AI 辅助: {'是' if parse_result.ai_used else '否（纯规则解析）'}")
+                result["output_excel"] = excel_path
+
+                # ====== v4: 成表后 → 每日 AI 复盘分析报告 ======
+                if parse_result.records:
+                    print("\n" + "-" * 60)
+                    print("开始 AI 生成每日复盘分析报告 ...")
+                    try:
+                        from src.parser import analyze_daily
+                        from backend.services.historical_context_service import (
+                            build as build_historical_context,
+                        )
+
+                        historical_context = None
+                        try:
+                            historical_context = build_historical_context(
+                                datetime.date.today(), parse_result.records
+                            )
+                            print(
+                                f"   历史上下文: {len(historical_context.get('kols', []))} 大V, "
+                                f"{len(historical_context.get('directions', []))} 方向"
+                            )
+                        except Exception as exc:
+                            print(f"   历史上下文构建失败（降级为无历史对比）: {exc}")
+
+                        # 数据完整性（爬虫元数据，来自本次 scroll 结果）
+                        if historical_context is None:
+                            historical_context = {}
+                        _stop_type = result.get("stop_type", "unknown")
+                        _bottom = bool(result.get("bottom_marker_detected", False))
+                        _expand_remaining = result.get("expand_remaining_visible", 0)
+                        historical_context["crawl_status"] = {
+                            "available": True,
+                            "integrity": "complete" if (_stop_type == "bottom" and _bottom and _expand_remaining == 0) else "incomplete",
+                            "stop_type": _stop_type,
+                            "bottom_detected": _bottom,
+                            "expand_remaining": _expand_remaining,
+                            "expand_failed": result.get("expand_permanently_failed", 0),
+                            "source_file": os.path.basename(json_output_file) if json_output_file else "",
+                        }
+
+                        report_path = analyze_daily(
+                            parse_result.records, historical_context=historical_context
+                        )
+                        if report_path:
+                            print(f"\n✅ 每日分析报告生成完成: {report_path}")
+                            result["output_report"] = report_path
+                        else:
+                            print(f"\n⚠ 每日分析报告未生成")
+                    except Exception as exc:
+                        print(f"\n⚠ 每日分析报告生成失败（不影响主流程）: {exc}")
+                        import traceback
+                        traceback.print_exc()
+            else:
+                print(f"\n⚠ Excel 未生成（记录数: {parse_result.total_records}）")
+        except Exception as exc:
+            print(f"\n⚠ AI 解析 / Excel 生成失败（MD 已保存，不影响主流程）: {exc}")
+            import traceback
+            traceback.print_exc()
+
+    print("\n" + "=" * 60)
+    print("🏁 全部流程完成")
+    print(f"   JSON : {json_output_file}")
+    print(f"   MD   : {screen_md}")
+    if result.get("output_excel"):
+        print(f"   Excel: {result.get('output_excel')}")
+    if result.get("output_report"):
+        print(f"   报告  : {result.get('output_report')}")
+    print("=" * 60)
+
+    # ====== 机器可读结果（供 pipeline 子进程解析） ======
+    crawl_success = bool(screen_md and os.path.exists(screen_md))
+    print(json.dumps({
+        "CRAWL_RESULT": True,
+        "success": crawl_success,
+        "md_path": screen_md or "",
+        "raw_json_path": json_output_file or "",
+    }, ensure_ascii=False), flush=True)
+
     return result
 
 
@@ -674,6 +773,15 @@ def main():
         if output_screen_md_path:
             print(f"   镜像 MD 文件 : {output_screen_md_path}（严格屏幕顺序，AI 直接投喂首选）")
         print("=" * 60)
+
+    # ====== 机器可读结果（供 pipeline 子进程解析） ======
+    crawl_success = bool(output_screen_md_path and os.path.exists(output_screen_md_path))
+    print(json.dumps({
+        "CRAWL_RESULT": True,
+        "success": crawl_success,
+        "md_path": output_screen_md_path or "",
+        "raw_json_path": output_path or "",
+    }, ensure_ascii=False), flush=True)
 
     logger.info("全部流程完成，退出。")
 

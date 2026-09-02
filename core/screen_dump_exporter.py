@@ -1,27 +1,16 @@
 """
-screen_dump 镜像导出器（严格"屏幕文字镜像"，不做任何识别/重组/总结）
+screen_dump 镜像导出器 v3.4（严格"屏幕文字镜像"，不做任何识别/重组/总结）
 ====================================================================
+
+v3.4 改动：
+  - MD 只写 visible_nodes（visible_texts）
+  - 完整 DOM/XML 另存 debug，不混入 MD
+  - 一屏一页，跨页不重叠去重（50% 重叠是允许的）
+  - 若页面有 visible_texts 字段则使用之，否则降级使用 texts
 
 输入：raw_pages dict 或 raw_pages_*.json 文件路径
 输出：output/screen_dump_YYYYMMDD_HHMMSS.md
 
-只做一件事：
-  - 按页序输出：# 页面N → 每个 text 一行 → 每行之间空一行
-  - 不做 BUY/SELL/基金/大V/金额/AI 任何识别
-  - 不重新组织，不总结，不删除任何业务文本
-
-跨页去重（v2）：
-  盘友圈是 WebView，dump 拿到的是"整个页面 DOM"而不是当前可视区域，
-  滚动只是把新内容追加进 DOM → 相邻两页的 texts 大面积重复。
-  因此按"出现次数差量"去重：某文本在第 N 页第 k 次出现，
-  只有当 k 超过前面各页累计已输出的次数时才输出，位置保持页内原序。
-  这样既不会把整页重复内容输出 N 遍，也不会误删每个帖子都有的
-  "买入确认中"等重复状态行（它们分属不同帖子，各自保留）。
-  完全没有新增内容的纯重复页直接跳过（不输出空的 # 页面N）。
-
-示例输入 texts:
-  ["光模块之王", "14:09", "指数回落了一点...", "买入确认中",
-   "平安半导体领航精...", "买入金额(元)", "30000"]
 示例输出：
   # 页面1
   <空行>
@@ -32,12 +21,6 @@ screen_dump 镜像导出器（严格"屏幕文字镜像"，不做任何识别/�
   指数回落了一点...
   <空行>
   买入确认中
-  <空行>
-  平安半导体领航精...
-  <空行>
-  买入金额(元)
-  <空行>
-  30000
 """
 
 from __future__ import annotations
@@ -55,6 +38,42 @@ _THIS_DIR = os.path.dirname(os.path.abspath(__file__))
 _PROJECT_ROOT = os.path.dirname(_THIS_DIR)
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
+
+
+# ============================================================
+#  系统 UI 噪声过滤（v3.5）
+# ============================================================
+_SYSTEM_NOISE = {
+    "Android 系统通知",
+    "微信通知",
+    "WLAN",
+    "中国移动",
+    "中国电信",
+    "中国联通",
+    "正在充电",
+    "振铃器静音",
+    "免打扰",
+    "侧屏幕面板",
+    "K/s",
+    "B/s",
+    "MB/s",
+    "GB/s",
+}
+
+
+def _is_system_noise(text: str) -> bool:
+    """判断是否为系统 UI 噪声文本。"""
+    t = text.strip()
+    if not t:
+        return True
+    # 精确匹配
+    if t in _SYSTEM_NOISE:
+        return True
+    # 前缀匹配（如 "WLAN 信号满格"、"正在充电，已完成百分之80"）
+    for noise in _SYSTEM_NOISE:
+        if t.startswith(noise):
+            return True
+    return False
 
 
 # ============================================================
@@ -80,7 +99,7 @@ def _escape_line(s: str) -> str:
 # ============================================================
 
 def _as_pages(payload: Any) -> List[Dict[str, Any]]:
-    """把各种输入统一成 [{"page":N, "texts":[...]}, ...] 列表（按出现顺序）。"""
+    """把各种输入统一成 [{"page":N, "texts":[...], "visible_texts":[...]}, ...] 列表（按出现顺序）。"""
     # JSON 文件路径
     if isinstance(payload, str) and os.path.exists(payload):
         with open(payload, "r", encoding="utf-8-sig") as f:
@@ -94,17 +113,34 @@ def _as_pages(payload: Any) -> List[Dict[str, Any]]:
                 if not isinstance(p, dict):
                     continue
                 texts = p.get("texts") if isinstance(p.get("texts"), list) else []
-                pages.append({
+                visible_texts = (
+                    p.get("visible_texts")
+                    if isinstance(p.get("visible_texts"), list)
+                    else []
+                )
+                page_dict: Dict[str, Any] = {
                     "page": int(p.get("page") or i),
                     "texts": [str(t) for t in texts],
-                })
+                    "visible_texts": [str(t) for t in visible_texts],
+                }
+                # 保留已有额外字段
+                for extra_key in ("source_round", "timestamp"):
+                    if extra_key in p:
+                        page_dict[extra_key] = p[extra_key]
+                pages.append(page_dict)
             if pages:
                 return pages
         # 单页 {page,texts} 结构
         if isinstance(payload.get("texts"), list):
+            visible_texts = (
+                payload.get("visible_texts")
+                if isinstance(payload.get("visible_texts"), list)
+                else []
+            )
             return [{
                 "page": int(payload.get("page") or 1),
                 "texts": [str(t) for t in payload["texts"]],
+                "visible_texts": [str(t) for t in visible_texts],
             }]
 
     raise TypeError(
@@ -118,41 +154,79 @@ def _as_pages(payload: Any) -> List[Dict[str, Any]]:
 # ============================================================
 
 def render_screen_dump_md(src: Any) -> str:
-    """把输入渲染成"屏幕文字镜像" Markdown 文本字符串（跨页按次数差量去重）。"""
+    """v3.4: 把输入渲染成"屏幕文字镜像" Markdown 文本。
+
+    若页面有 visible_texts 字段则使用之（一屏一页，不跨页去重），
+    否则降级使用 texts（保持旧跨页去重逻辑）。
+    """
     from collections import Counter
 
     pages = _as_pages(src)
+
+    # 检测是否使用 visible_texts
+    visible_pages = sum(
+        1 for p in pages
+        if isinstance(p.get("visible_texts"), list) and len(p.get("visible_texts", [])) > 0
+    )
+    use_visible = visible_pages > 0
+
+    fallback_pages = len(pages) - visible_pages
+
+    print(f"[SCREEN_DUMP]")
+    print(f"  pages={len(pages)}")
+    print(f"  use_visible={use_visible}")
+    print(f"  visible_pages={visible_pages}")
+    print(f"  fallback_pages={fallback_pages}")
+
+    if not use_visible:
+        print(f"[SCREEN_DUMP] WARNING: visible_texts unavailable, fallback to legacy texts mode")
+
     lines: List[str] = []
 
-    # emitted[t] = 到目前为止，文本 t 已输出的次数
-    emitted: Counter = Counter()
-
-    for p in pages:
-        page_no = int(p.get("page") or 1)
-        texts: List[str] = [str(t) for t in (p.get("texts") or []) if t is not None]
-
-        cnt: Counter = Counter()
-        new_texts: List[str] = []
-        for t in texts:
-            cnt[t] += 1
-            # 本页第 cnt[t] 次出现；只有超过"之前累计已输出次数"才是真新增
-            if cnt[t] > emitted[t]:
-                new_texts.append(t)
-
-        # 更新已输出计数为本页与历史的较大值（DOM 只会增，不会少算）
-        for t, c in cnt.items():
-            if c > emitted[t]:
-                emitted[t] = c
-
-        # 纯重复页（没有任何新增文本）→ 跳过，不输出空的 # 页面N
-        if not new_texts:
-            continue
-
-        lines.append(f"# 页面{page_no}")
-        lines.append("")
-        for t in new_texts:
-            lines.append(_escape_line(t))
+    if use_visible:
+        # v3.4: 一屏一页，不跨页去重（50% 重叠是正常的）
+        for p in pages:
+            page_no = int(p.get("page") or 1)
+            vtexts: List[str] = [
+                str(t) for t in (p.get("visible_texts") or [])
+                if t is not None and not _is_system_noise(str(t))
+            ]
+            if not vtexts:
+                continue
+            lines.append(f"# 页面{page_no}")
             lines.append("")
+            for t in vtexts:
+                lines.append(_escape_line(t))
+                lines.append("")
+    else:
+        # 降级：使用 texts + 跨页去重
+        emitted: Counter = Counter()
+        for p in pages:
+            page_no = int(p.get("page") or 1)
+            texts: List[str] = [
+                str(t) for t in (p.get("texts") or [])
+                if t is not None and not _is_system_noise(str(t))
+            ]
+
+            cnt: Counter = Counter()
+            new_texts: List[str] = []
+            for t in texts:
+                cnt[t] += 1
+                if cnt[t] > emitted[t]:
+                    new_texts.append(t)
+
+            for t, c in cnt.items():
+                if c > emitted[t]:
+                    emitted[t] = c
+
+            if not new_texts:
+                continue
+
+            lines.append(f"# 页面{page_no}")
+            lines.append("")
+            for t in new_texts:
+                lines.append(_escape_line(t))
+                lines.append("")
 
     return "\n".join(lines)
 

@@ -1,0 +1,51 @@
+# ===== 环境与密钥（严禁提交）=====
+.env
+.env.local
+.env.*.local
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+
+# ===== 采集数据（含真实用户数据，不公开）=====
+output/
+
+# ===== 日志 =====
+logs/
+*.log
+
+# ===== Node / 前端 =====
+node_modules/
+dist/
+.pnpm-store/
+
+# ===== 调试与 dump =====
+debug/
+dumps/
+window.xml
+query
+
+# ===== 旧副本 / 临时 =====
+1/
+
+# ===== 第三方二进制 / 工具 =====
+vendor/
+scrcpy.exe.lnk
+
+# ===== 个人笔记 =====
+对话记录.md
+提示词.md
+
+# ===== IDE =====
+.trae/
+.idea/
+.vscode/
+
+# ===== 系统文件 =====
+Thumbs.db
+.DS_Store

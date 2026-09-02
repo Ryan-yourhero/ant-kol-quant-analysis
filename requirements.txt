@@ -2,18 +2,23 @@
 # 蚂蚁财富大V操作数据采集工具 - 依赖清单
 # ========================================
 
-# 基础依赖（标准库无需安装，此处为文档说明）
-# subprocess, re, xml.etree.ElementTree, os, json, csv, logging, argparse, datetime
-
-# 第三方依赖
-# lxml: 高性能XML解析（可选，若xml.etree.ElementTree解析不兼容时启用）
+# ===== XML 解析（爬虫核心） =====
 lxml>=4.9.0
-
-# xmltodict: XML转字典（可选，便于调试XML结构）
 xmltodict>=0.13.0
 
-# click: 优雅的命令行接口（可选，用于增强CLI体验）
+# ===== CLI 增强 =====
 click>=8.0.0
-
-# rich: 终端美化输出（可选，日志和结果展示更友好）
 rich>=13.0.0
+
+# ===== v3: AI 解析 & Excel 导出 =====
+# Excel 读写
+openpyxl>=3.1.0
+
+# 数据校验
+pydantic>=2.0.0
+
+# .env 配置加载
+python-dotenv>=1.0.0
+
+# HTTP 请求（LLM API）
+requests>=2.28.0

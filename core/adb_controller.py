@@ -341,19 +341,19 @@ class ADBController:
 
         # 打印状态
         if not devices:
-            print("  ❌ 未检测到任何设备")
-            print("     请：1) USB连接手机  2) 打开开发者选项→USB调试  3) 手机弹窗点允许")
+            print("  [X] 未检测到任何设备")
+            print("     请：1) USB连接手机  2) 打开开发者选项->USB调试  3) 手机弹窗点允许")
             raise ADBDeviceNotFoundError("无设备连接")
 
         print(f"  共检测到 {len(devices)} 台设备：")
         for d in devices:
             tip = ""
             if d["state"] == "unauthorized":
-                tip = "  ⚠ 未授权 → 请在手机上允许USB调试"
+                tip = "  [!] 未授权 -> 请在手机上允许USB调试"
             elif d["state"] == "offline":
-                tip = "  ⚠ 离线 → 请重新插拔USB或重启adb服务 (adb kill-server && adb start-server)"
+                tip = "  [!] 离线 -> 请重新插拔USB或重启adb服务 (adb kill-server && adb start-server)"
             elif d["available"]:
-                tip = "  ✅ 可用"
+                tip = "  [OK] 可用"
             model_str = f"[{d['model']}]" if d["model"] else ""
             print(f"    - {d['serial']}  state={d['state']}  {model_str} {tip}")
 
