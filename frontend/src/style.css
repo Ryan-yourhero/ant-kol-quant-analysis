@@ -1,0 +1,52 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; font-size: 14px; color: #333; background: #f5f7fa; }
+a { color: #409eff; text-decoration: none; }
+table { width: 100%; border-collapse: collapse; }
+th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid #ebeef5; }
+th { background: #f5f7fa; font-weight: 600; white-space: nowrap; }
+tr:hover { background: #f0f7ff; }
+.btn { display: inline-block; padding: 8px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+.btn-primary { background: #409eff; color: #fff; }
+.btn-primary:hover { background: #66b1ff; }
+.btn-primary:disabled { background: #a0cfff; cursor: not-allowed; }
+.btn-default { background: #fff; color: #606266; border: 1px solid #dcdfe6; }
+.btn-sm { padding: 4px 12px; font-size: 12px; }
+.card { background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+.card-title { font-size: 16px; font-weight: 600; margin-bottom: 16px; color: #303133; }
+.stat-box { display: inline-flex; flex-direction: column; align-items: center; padding: 12px 24px; background: #f5f7fa; border-radius: 6px; margin-right: 12px; }
+.stat-box .num { font-size: 24px; font-weight: 700; color: #409eff; }
+.stat-box .label { font-size: 12px; color: #909399; margin-top: 4px; }
+.filter-row { display: flex; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; align-items: flex-end; }
+.filter-row input, .filter-row select { padding: 6px 10px; border: 1px solid #dcdfe6; border-radius: 4px; font-size: 13px; }
+.pagination { display: flex; justify-content: center; align-items: center; gap: 8px; margin-top: 16px; }
+.pagination button { padding: 6px 12px; }
+.pagination span { color: #909399; font-size: 13px; }
+.status-tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+.status-success { background: #e6f7e6; color: #52c41a; }
+.status-running { background: #e6f0ff; color: #409eff; }
+.status-failed { background: #fde8e8; color: #f56c6c; }
+.status-idle { background: #f5f5f5; color: #999; }
+.nav { display: flex; gap: 24px; padding: 0 24px; background: #fff; border-bottom: 1px solid #e4e7ed; height: 48px; align-items: center; margin-bottom: 20px; }
+.nav a { color: #606266; font-size: 14px; padding: 0 4px 12px; border-bottom: 2px solid transparent; }
+.nav a.active { color: #409eff; border-bottom-color: #409eff; }
+.container { max-width: 1200px; margin: 0 auto; padding: 0 20px; }
+.modal-mask { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 1000; }
+.modal { background: #fff; border-radius: 8px; width: 92%; max-width: 960px; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden; }
+.modal-head { display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; border-bottom: 1px solid #ebeef5; font-weight: 600; }
+.report-content { padding: 16px 20px; overflow: auto; font-family: -apple-system, 'Microsoft YaHei', 'Segoe UI', sans-serif; font-size: 14px; line-height: 1.8; }
+.report-content h1, .report-content h2, .report-content h3, .report-content h4 { margin: 18px 0 10px; color: #1a1a1a; }
+.report-content h1 { font-size: 20px; border-bottom: 1px solid #ebeef5; padding-bottom: 6px; }
+.report-content h2 { font-size: 17px; }
+.report-content h3 { font-size: 15px; color: #409eff; }
+.report-content h4 { font-size: 14px; color: #606266; }
+.report-content p { margin: 8px 0; }
+.report-content strong { color: #1a1a1a; font-weight: 700; }
+.report-content hr { border: none; border-top: 1px solid #ebeef5; margin: 16px 0; }
+.report-content table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 13px; }
+.report-content th, .report-content td { padding: 8px 12px; text-align: left; border: 1px solid #ebeef5; }
+.report-content th { background: #f5f7fa; font-weight: 600; white-space: nowrap; }
+.report-content td { vertical-align: top; }
+.report-content ul, .report-content ol { padding-left: 24px; margin: 8px 0; }
+.report-content li { margin: 4px 0; }
+.report-content blockquote { border-left: 3px solid #409eff; padding-left: 12px; color: #606266; margin: 10px 0; }
+.report-content code { background: #f5f7fa; padding: 1px 4px; border-radius: 3px; font-size: 12px; }
