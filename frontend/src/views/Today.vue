@@ -10,6 +10,15 @@
         <span v-if="status.message" style="color: #909399; font-size: 13px;">{{ status.message }}</span>
         <span v-if="status.error" style="color: #f56c6c; font-size: 13px;">{{ status.error }}</span>
       </div>
+      <div v-if="status.logs && status.logs.length" class="log-box">
+        <div class="log-head">
+          <span>采集日志</span>
+          <span class="log-tip">滚动查看最新进度</span>
+        </div>
+        <div class="log-body">
+          <div v-for="(line, i) in status.logs" :key="i" class="log-line">{{ line }}</div>
+        </div>
+      </div>
     </div>
 
     <div class="card">

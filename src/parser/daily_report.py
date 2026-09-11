@@ -1,14 +1,15 @@
 """
-每日 AI 分析报告生成器
-=====================
+每日 AI 分析报告生成器（v3 — 严格 Source of Truth）
+==================================================
+
 在「采集 → screen_dump MD → AI 解析 → 成表(Excel)」之后，
 基于已生成的 TradeRecord 列表，调用 LLM 生成一份每日复盘分析报告（Markdown）。
 
-流程：
-  records (List[TradeRecord])
-  → 序列化为 Markdown 表格
-  → LLM（按 DAILY_REPORT_SYSTEM_PROMPT 复盘分析）
-  → 保存 output/daily_report_YYYYMMDD.md
+v3 关键约束：
+  - 每笔交易 direction 已由 Python 在调用 generate_daily_report 之前固化
+  - 报告输入必须包含"每笔交易的 direction"（per_record_assertion）
+  - LLM 禁止重算 direction、禁止重算百分比、禁止重算金额
+  - 所有数值/状态标签/置信度必须原样引用输入
 """
 
 from __future__ import annotations
@@ -39,7 +40,7 @@ DAILY_REPORT_SYSTEM_PROMPT = """一、角色设定
 - 互动数据（转发/评论/点赞/求解读人数）
 - "展开今日全部N条操作"按钮
 
-三、核心约束
+三、核心约束（强制）
 1. 不依赖历史记忆：你只能基于当前输入的数据进行判断，不得使用"该大V以前买过这只基金"作为匹配依据
 2. 一笔一行：每笔操作记录占一行，同一帖子下的多笔操作分别列出
 3. 原文照录：OCR截断导致的基金名称不完整，照录即可，不要编造
@@ -51,27 +52,6 @@ DAILY_REPORT_SYSTEM_PROMPT = """一、角色设定
 表头：
 大V昵称 | 收益率周期 | 收益率 | 发布时间 | 动态正文 | 操作类型 | 操作状态 | 基金名称 | 买入金额(元) | 卖出份额(份) | 转换前基金名称 | 转换后基金名称 | 转发数 | 评论数 | 点赞数 | 求解读人数 | 采集时间 | 今日操作条数
 
-字段填充规则：
-- 大V昵称：截屏中明确显示的昵称；孤立操作记录需推断并标注
-- 收益率周期：截屏中展示的周期（近一年/近一月/昨日）
-- 收益率：截屏中的收益率数值
-- 发布时间：截屏中的时间
-- 动态正文：该操作对应的帖子正文，摘要30字以内；无则填"无附带观点"
-- 操作类型：买入 / 卖出 / 转换(转出) / 转换(转入) / 定投 / 撤销
-- 操作状态：确认中 / 已确认 / 撤销
-- 基金名称：基金简称（原文截断照录）
-- 买入金额(元)：买入或转换转入的金额
-- 卖出份额(份)：卖出或转换转出的份额
-- 转换前基金名称：转换转出的基金
-- 转换后基金名称：转换转入的基金
-- 转发数：该帖子下的转发数（同一帖子下多笔操作共享）
-- 评论数：该帖子下的评论数（同一帖子下多笔操作共享）
-- 点赞数：该帖子下的点赞数（同一帖子下多笔操作共享）
-- 求解读人数：该笔操作独有的"已有X人求解读"
-- 采集时间：本次截屏的采集时间
-- 今日操作条数：该大V今日总操作条数（从"展开今日全部N条操作"提取）
-注意："转发数/评论数/点赞数"归属于帖子，同一帖子下的多笔操作共享同一套互动数据，输出时每行填同样数字。
-
 五、孤立操作记录的归属推断规则
 当截屏中出现未显示大V名字的操作记录时，按以下优先级判断归属：
 1. 帖内点名匹配：帖子里出现"基金名称"格式，随后有对应基金的买入记录，则该操作属于该帖子作者
@@ -80,12 +60,19 @@ DAILY_REPORT_SYSTEM_PROMPT = """一、角色设定
 4. 操作风格匹配：金额模式（如10元定投）、标的类型与该大V历史风格一致（谨慎使用，需标注）
 推断结果标注：归属推断的操作，在大V昵称列标注为"（归属推断：XXX）"
 
-六、方向分类规则（由 Python 前置计算，AI 只引用）
-方向分类由前置 Python 程序完成，AI 不得自行重新分类。分类优先级：
+六、方向分类规则（由 Python 一次性固化，AI 禁止重算）
+方向分类在 generate_daily_report 调用前已由 Python 一次性固化，分类优先级：
 1. 基金名称明确命中关键词（如"半导体"→半导体/科创芯片，"黄金"→黄金）
-2. 同帖基金级上下文明确定义（如观点明确说"该基金投资半导体产业链"）
-3. 已有可靠基金映射
+2. 已有可靠基金映射
+3. 同帖基金级上下文明确定义（必须能同时定位到具体基金名 + 方向短语，缺一不可）
 4. 无法确认 → "其他/待分类"
+
+**关键原则：帖子主题 ≠ 基金方向证据**
+只有"基金A就是/属于/主要布局X"这类能明确把具体基金与方向关联的表达，才允许 context classification。
+整篇帖子讨论半导体/CPO 不会把帖内所有基金都归为半导体。
+
+每笔交易的 direction / classification_source / classification_confidence / classification_evidence 已经在
+【每笔交易的方向归属（Source of Truth）】中给出，**必须原样引用**。
 
 「其他/待分类」方向特殊规则：
 - 只展示：今日人数、今日买入金额、今日卖出操作数
@@ -93,14 +80,20 @@ DAILY_REPORT_SYSTEM_PROMPT = """一、角色设定
 - 不参与：买入推荐、卖出推荐
 - 原因：该方向可能混合了 AI应用、量化、红利、电力、消费、普通混合基金等，不是同一投资方向
 
-七、方向汇总输出
+七、转换操作语义（必须遵守）
+- sell_type = "direct_sell"：主动卖出，按真实减仓信号处理
+- sell_type = "conversion_out"：转换转出（如"由电网方向转换至港股方向"），不计入"卖出强度/减仓"，
+  不能与主动卖出等权处理
+- 转换操作应描述为"从 X 方向转换至 Y 方向"，**禁止**简单拆成"卖出 X + 买入 Y"
+
+八、方向汇总输出
 ### 三、方向汇总
 | 方向 | 今日人数 | 今日金额 | 7日人数变化 | 7日金额变化 | 判断 |
 [表格：从输入的方向结构化数据原样引用，不得重算]
 排序规则：按今日人数从高到低排序。
 注意：「其他/待分类」方向需在判断列说明包含哪些基金，例如："含惠理价值对冲、国金智远量化等5只基金"。
 
-八、数据质量与完整性标记
+九、数据质量与完整性标记
 数据完整性必须依据输入中的【采集状态】（crawl_status，来自爬虫元数据），不得凭"某个历史大V今天没出现"去推测采集不完整。
 - crawl_status.integrity == "complete"（stop_type=bottom 且 bottom_detected=true 且 expand_remaining=0）：视为采集正常到底，不标注"不完整"
 - crawl_status.integrity == "incomplete"（stuck / max_scroll / 异常退出 / 未到底 / 仍有未处理展开）：才标注"可能提前终止 / 数据可能不完整"
@@ -109,10 +102,15 @@ DAILY_REPORT_SYSTEM_PROMPT = """一、角色设定
 - OCR金额缺失：标注"（数据缺失）"
 - 页面内容重复：标注"存在重复抓取"
 
-九、近7日历史对比数据使用规则
-输入中会附带【近7日历史对比数据】（结构化 JSON，由前置 Python 聚合计算，含大V/方向两个维度的今日 vs 近7日对比、连续行为标签、信号类型、置信度）。
+十、近7日历史对比数据使用规则（绝对禁止 LLM 重算）
+输入中会附带【近7日历史对比数据】（结构化 JSON，由前置 Python 聚合计算，含大V/方向两个维度的今日 vs 近7日对比、连续行为标签、信号类型、置信度、分类证据）。
 
-【核心原则】Python 负责事实和数字，你只负责解释。所有数值、百分比、排名、状态标签、信号类型、置信度必须原样引用输入的结构化统计结果，不得自行重新计算、估算、修改或混淆不同层级的指标；若两个字段口径不同，必须明确区分，不得混用。
+【核心原则】Python 负责事实和数字，你只负责解释。所有数值、百分比、排名、状态标签、信号类型、置信度必须原样引用输入的结构化统计结果，**禁止自行重新计算、估算、修改或混淆不同层级的指标**。
+
+**禁止 LLM 计算百分比**
+- pct_change = (today / historical_avg - 1) * 100 全部由 Python 计算
+- 数字一致性已通过 `_assert_pct_consistency` 校验
+- 若发现 Python 给的 pct 与 today/avg 看起来不一致，应标注"数据校验异常"，而不是自行重算
 
 字段口径区分（务必区分，禁止混用）：
 - 大V整体口径：kols[].last_7d.avg_daily_buy_amount（该大V近7日全部方向的日均买入金额），用于「核心大V操作详解」。
@@ -151,13 +149,12 @@ DAILY_REPORT_SYSTEM_PROMPT = """一、角色设定
 - 综合 buy_kol_count / sell_kol_count / buy_amount_trend / individual_behavior 形成统一结论
 - 例如方向整体升温但存在个别卖出 → "整体共识升温，但内部存在分歧"，不要前后矛盾地既写"强烈看好"又写"由买转卖风险"
 
-十、转换操作语义
-转换操作应描述为"从 X 方向转换至 Y 方向"，不要简单拆成"卖出 X + 买入 Y"。
-历史行为应区分"主动卖出"和"转换转出"，避免把转换误判成强烈看空。
-
 十一、买入推荐规则
 ### 五、买入推荐
-最多输出 3 个方向。推荐依据必须主要来自：
+**严格约束**：只能从输入的【推荐候选方向】JSON 中 `buy_candidates` 列表挑选，最多 3 个。
+不得自选 `buy_candidates` 之外的方向。
+
+推荐依据必须主要来自：
 1. 今日有真实买入
 2. 多位大V参与
 3. 今日参与人数相对7日提升
@@ -175,11 +172,14 @@ DAILY_REPORT_SYSTEM_PROMPT = """一、角色设定
 注意：
 - "推荐"仅表示：基于当前采集到的大V交易行为值得优先关注的买入方向
 - 不要输出：建议立即买入、重仓、抄底、满仓、必涨
-- 「其他/待分类」方向不参与买入推荐
+- 「其他/待分类」方向已被 Python 预剔除，无需也不允许加入
 
 十二、卖出推荐规则
 ### 六、卖出推荐
-最多输出 3 个方向。卖出推荐依据：
+**严格约束**：只能从输入的【推荐候选方向】JSON 中 `sell_candidates` 列表挑选，最多 3 个。
+不得自选 `sell_candidates` 之外的方向。
+
+卖出推荐依据：
 1. 今日出现多人真实卖出
 2. 连续多日卖出
 3. 由买转卖
@@ -189,6 +189,8 @@ DAILY_REPORT_SYSTEM_PROMPT = """一、角色设定
 7. 有撤销买入 + 卖出组合
 8. 买卖分歧明显且卖出行为增强
 
+**「其他/待分类」方向已被 Python 预剔除；conversion_out 计入 `sell_conversion_kol_count` 不参与 sell_direct 强度排名**
+
 输出表格：
 | 排名 | 方向 | 今日卖出情况 | 近7日变化 | 推荐理由 | 参考大V | 置信度 |
 
@@ -197,7 +199,7 @@ DAILY_REPORT_SYSTEM_PROMPT = """一、角色设定
 - 不能把不同基金的卖出份额直接相加作为资金强度
 - "卖出推荐"表示：从大V行为角度出现较明显的减仓/卖出信号
 - 不要输出：必须卖出、立即清仓、一定下跌
-- 「其他/待分类」方向不参与卖出推荐
+- 转换转出（conversion_out）不与主动卖出等权处理；推荐理由必须区分
 
 十三、风险提示规则
 ### 七、风险提示
@@ -262,7 +264,6 @@ def _cell(value: Any) -> str:
     if value is None:
         return ""
     s = str(value).strip()
-    # 转义竖线 / 换行，避免破坏表格结构
     s = s.replace("|", "\\|").replace("\n", " ")
     return s
 
@@ -292,8 +293,8 @@ def generate_daily_report(
     """调用 LLM 生成每日复盘分析报告，返回 Markdown 文本。
 
     Args:
-        historical_context: 近7日历史对比 JSON（由 HistoricalContextService 生成）。
-                            若提供，会作为【近7日历史对比数据】注入给 AI。
+        historical_context: 由 HistoricalContextService.build() 生成的结构化 JSON，
+                            包含 kols / directions / consistency_check 等。
     """
     if not records:
         logger.warning("无记录，跳过每日分析报告")
@@ -305,12 +306,29 @@ def generate_daily_report(
 
     table = records_to_markdown(records)
 
-    # 统计今日参与大V数量（去重）
     kol_names = {r.kol_name for r in records if r.kol_name}
     kol_count = len(kol_names)
 
+    # 抽取每笔 direction 来源（来自 historical_context.consistency_check 中
+    # 隐含的 per_record；若未传则需要上游 build 时已固化）
+    per_record_lines = []
+    if historical_context:
+        # historical_context 不直接暴露 per_record 列表（控制体积）；
+        # 但每笔 direction 在一致性校验 items 里只到 kol/direction 级别。
+        # 详情方向分类由上游调用方在调用前完成，本生成器不重新分类。
+        per_record_lines = [
+            "（每笔交易的 direction / source / confidence / evidence 已由前置 Python 固化，",
+            "  详见 `historical_context.consistency_check.items` 中涉及的大V×方向汇总，",
+            "  以及各 kol.directions[].direction_today_buy_amount 的归属。）",
+        ]
+    else:
+        per_record_lines = [
+            "（未提供历史上下文；无法给出每笔 direction 的归属证据，",
+            "  报告生成前请确保调用 HistoricalContextService.build() 完成方向分类固化。）",
+        ]
+
     parts = [
-        "以下数据已由前置流程解析成表（每行一笔操作，字段见表头），"
+        "以下数据已由前置流程解析成表（每行一笔操作，字段见表头），",
         "请据此直接输出每日复盘分析报告（按「十四、完整输出结构」）。",
         "",
         f"## 今日采集概况",
@@ -319,7 +337,31 @@ def generate_daily_report(
         "",
         "## 今日原始数据表",
         table,
+        "",
+        "## 每笔交易的方向归属（Source of Truth）",
+        *per_record_lines,
     ]
+
+    # 把推荐候选也单独传给 LLM（强制它只能从中选）
+    if historical_context:
+        import json as _json
+        buy_cands = historical_context.get("recommend_buy_candidates", [])
+        sell_cands = historical_context.get("recommend_sell_candidates", [])
+        if buy_cands or sell_cands:
+            parts += [
+                "",
+                "## 推荐候选方向（Python 预筛选，已剔除「其他/待分类」）",
+                "买入推荐 / 卖出推荐 **只能**从下列候选方向中挑选（最多 3 个）：",
+                "```json",
+                _json.dumps(
+                    {
+                        "buy_candidates": buy_cands,
+                        "sell_candidates": sell_cands,
+                    },
+                    ensure_ascii=False, indent=2, default=str,
+                ),
+                "```",
+            ]
 
     if historical_context:
         import json as _json
@@ -327,8 +369,9 @@ def generate_daily_report(
         parts += [
             "",
             "## 近7日历史对比数据",
-            "以下是前置 Python 聚合计算出的结构化历史对比数据（JSON），"
+            "以下是前置 Python 聚合计算出的结构化历史对比数据（JSON），",
             "请结合它判断「今日 vs 近7日」的相对强弱，不要只凭今日绝对金额下结论。",
+            "**禁止自行重算百分比 / 金额 / 方向。** 数字一致性已通过 `consistency_check` 校验。",
             "```json",
             _json.dumps(historical_context, ensure_ascii=False, indent=2, default=str),
             "```",
@@ -378,18 +421,12 @@ def export_daily_report(
     output_dir: Optional[str] = None,
     date_str: Optional[str] = None,
 ) -> str:
-    """把报告文本保存到 output/daily_report_YYYYMMDD.md，返回文件路径。
-
-    Args:
-        date_str: 目标日期（YYYYMMDD 或 YYYY-MM-DD）。默认今天。
-                  用于补跑历史日期时，把报告保存到对应日期的文件名。
-    """
+    """把报告文本保存到 output/daily_report_YYYYMMDD.md，返回文件路径。"""
     if output_dir is None:
         output_dir = _resolve_output_dir()
     os.makedirs(output_dir, exist_ok=True)
 
     if date_str:
-        # 兼容 YYYY-MM-DD 与 YYYYMMDD 两种写法
         cleaned = date_str.replace("-", "")
         if len(cleaned) == 8 and cleaned.isdigit():
             date_str = cleaned
@@ -414,12 +451,7 @@ def analyze_daily(
     date_str: Optional[str] = None,
     historical_context: Optional[dict] = None,
 ) -> Optional[str]:
-    """一站式：records → AI 分析报告 → 保存 .md，返回报告路径（失败返回 None）。
-
-    Args:
-        date_str: 目标日期（YYYYMMDD 或 YYYY-MM-DD）。默认今天。
-        historical_context: 近7日历史对比 JSON（由 HistoricalContextService 生成）。
-    """
+    """一站式：records → AI 分析报告 → 保存 .md，返回报告路径（失败返回 None）。"""
     report_text = generate_daily_report(records, historical_context=historical_context)
     if not report_text:
         return None

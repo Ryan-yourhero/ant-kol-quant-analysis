@@ -26,13 +26,14 @@ app.add_middleware(
 )
 
 # 延迟导入路由（避免循环依赖）
-from backend.api import runs, operations, kols, excel, reports  # noqa: E402
+from backend.api import runs, operations, kols, excel, reports, funds  # noqa: E402
 
 app.include_router(runs.router, prefix="/api")
 app.include_router(operations.router, prefix="/api")
 app.include_router(kols.router, prefix="/api")
 app.include_router(excel.router, prefix="/api")
 app.include_router(reports.router, prefix="/api")
+app.include_router(funds.router, prefix="/api")
 
 
 @app.get("/api/health")

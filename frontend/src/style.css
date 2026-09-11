@@ -22,6 +22,12 @@ tr:hover { background: #f0f7ff; }
 .pagination button { padding: 6px 12px; }
 .pagination span { color: #909399; font-size: 13px; }
 .status-tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 12px; }
+.log-box { margin-top: 14px; border: 1px solid #ebeef5; border-radius: 6px; background: #fafafa; }
+.log-head { display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; border-bottom: 1px solid #ebeef5; font-size: 12px; color: #606266; font-weight: 600; background: #f5f7fa; border-radius: 6px 6px 0 0; }
+.log-tip { font-weight: 400; color: #909399; font-size: 11px; }
+.log-body { padding: 6px 12px; max-height: 130px; overflow-y: auto; font-family: 'Consolas', 'Courier New', monospace; font-size: 12px; line-height: 1.55; color: #303133; }
+.log-line { white-space: pre-wrap; word-break: break-all; }
+.log-line:last-child { color: #409eff; }
 .status-success { background: #e6f7e6; color: #52c41a; }
 .status-running { background: #e6f0ff; color: #409eff; }
 .status-failed { background: #fde8e8; color: #f56c6c; }

@@ -35,7 +35,11 @@ _current_status: Dict[str, Any] = {
     "error": None,
     "started_at": None,
     "finished_at": None,
+    "logs": [],  # 最近 N 行 main.py 输出（采集进度日志）
 }
+
+# 日志保留行数（避免前端数据过大）
+MAX_LOG_LINES = 30
 
 
 def get_current_status() -> dict:
@@ -82,6 +86,7 @@ def _run():
         error=None,
         started_at=datetime.now().isoformat(),
         finished_at=None,
+        logs=[],
     )
     run_id = None
 
@@ -134,6 +139,11 @@ def _run():
             line = raw_line.rstrip("\n")
             all_output.append(line)
             logger.info("[main.py] %s", line)
+            # 追加到状态日志（仅保留最近 N 行）
+            with _lock:
+                _current_status["logs"].append(line)
+                if len(_current_status["logs"]) > MAX_LOG_LINES:
+                    _current_status["logs"] = _current_status["logs"][-MAX_LOG_LINES:]
             if line.startswith('{"CRAWL_RESULT"'):
                 try:
                     crawl_result = json.loads(line)

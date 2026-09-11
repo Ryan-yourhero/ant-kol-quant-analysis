@@ -137,6 +137,8 @@ def init_db():
 
     # 迁移：给已有表加新列
     _migrate_crawl_runs(engine)
+    _migrate_operations(engine)
+    _migrate_fund_direction_master(engine)
     logger.info("MySQL 表初始化完成")
 
 
@@ -165,6 +167,84 @@ def _migrate_crawl_runs(_engine):
         conn.close()
     except Exception as e:
         logger.warning("迁移检查失败（不影响运行）: %s", e)
+
+
+def _migrate_operations(_engine):
+    """给 operations 表补充 fund_code / fund_direction_id 列。"""
+    try:
+        import pymysql
+        conn = pymysql.connect(
+            host=MYSQL_HOST, port=int(MYSQL_PORT), user=MYSQL_USER,
+            password=MYSQL_PASSWORD, database=MYSQL_DATABASE, charset="utf8mb4",
+        )
+        cursor = conn.cursor()
+        cursor.execute("SHOW COLUMNS FROM operations")
+        existing = {row[0] for row in cursor.fetchall()}
+        new_cols = [
+            ("fund_code", "VARCHAR(20) NULL"),
+            ("fund_direction_id", "INT NULL"),
+        ]
+        for col_name, col_def in new_cols:
+            if col_name not in existing:
+                cursor.execute(f"ALTER TABLE operations ADD COLUMN {col_name} {col_def}")
+                logger.info("迁移: operations.%s 已添加", col_name)
+        # 索引（如果还没有）
+        try:
+            cursor.execute(
+                "CREATE INDEX ix_ops_fund_direction ON operations(fund_direction_id)"
+            )
+        except Exception:
+            pass  # 索引可能已存在
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        logger.warning("operations 迁移检查失败（不影响运行）: %s", e)
+
+
+def _migrate_fund_direction_master(_engine):
+    """fund_direction_master 表在 Base.metadata.create_all 时已建；
+    这里只检查并打日志。"""
+    try:
+        import pymysql
+        conn = pymysql.connect(
+            host=MYSQL_HOST, port=int(MYSQL_PORT), user=MYSQL_USER,
+            password=MYSQL_PASSWORD, database=MYSQL_DATABASE, charset="utf8mb4",
+        )
+        cursor = conn.cursor()
+        cursor.execute("SHOW TABLES LIKE 'fund_direction_master'")
+        if not cursor.fetchone():
+            logger.warning("fund_direction_master 表未创建，请检查 init_db")
+        else:
+            logger.info("fund_direction_master 表已就绪")
+
+        # 迁移：补充新增列
+        cursor.execute("SHOW COLUMNS FROM fund_direction_master")
+        existing = {row[0] for row in cursor.fetchall()}
+        new_cols = [
+            ("last_search_at", "DATETIME NULL"),
+            ("next_reverify_at", "DATETIME NULL"),
+            ("evidence_period", "VARCHAR(20) NULL"),
+            ("fund_type_detail", "VARCHAR(50) NULL"),
+            ("evidence_items_json", "TEXT NULL"),
+        ]
+        for col_name, col_def in new_cols:
+            if col_name not in existing:
+                cursor.execute(
+                    f"ALTER TABLE fund_direction_master ADD COLUMN {col_name} {col_def}"
+                )
+                logger.info("迁移: fund_direction_master.%s 已添加", col_name)
+        # 索引
+        try:
+            cursor.execute(
+                "CREATE INDEX ix_fdm_next_reverify ON fund_direction_master(next_reverify_at)"
+            )
+        except Exception:
+            pass
+        conn.commit()
+        cursor.close()
+        conn.close()
+    except Exception as e:
+        logger.warning("fund_direction_master 检查/迁移失败: %s", e)
 
 
 def _ensure_database():
