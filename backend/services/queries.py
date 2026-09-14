@@ -50,21 +50,46 @@ def query_operations(
             q = q.filter(Operation.fund_name.like(f"%{fund_name}%"))
 
         total = q.count()
-        items = (
+        rows = (
             q.order_by(desc(Operation.collect_date), desc(Operation.id))
             .offset((page - 1) * page_size)
             .limit(page_size)
             .all()
         )
 
+        # 附加每笔 direction（查 fund_direction_master）
+        items = []
+        for op in rows:
+            d = _op_to_dict(op)
+            d["direction"] = _lookup_direction(session, op.fund_name, op.fund_code)
+            items.append(d)
+
         return {
-            "items": [_op_to_dict(op) for op in items],
+            "items": items,
             "total": total,
             "page": page,
             "page_size": page_size,
         }
     finally:
         session.close()
+
+
+def _lookup_direction(session, fund_name: Optional[str], fund_code: Optional[str]) -> Optional[str]:
+    """从 fund_direction_master 查基金方向。"""
+    from src.storage.models import FundDirectionMaster
+    from backend.services import fund_direction_repo as repo
+
+    if fund_code:
+        rec = session.query(FundDirectionMaster).filter_by(fund_code=fund_code).first()
+        if rec:
+            return rec.direction
+    if fund_name:
+        norm = repo.normalize_fund_name(fund_name)
+        if norm:
+            rec = session.query(FundDirectionMaster).filter_by(normalized_name=norm).first()
+            if rec:
+                return rec.direction
+    return None
 
 
 def _op_to_dict(op: Operation) -> dict:

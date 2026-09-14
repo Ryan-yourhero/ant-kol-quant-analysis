@@ -70,10 +70,17 @@ def resolve_direction(
     # ---- 1. DB 查 ----
     db_hit = repo.lookup_fund(fund_name, fund_code=fund_code)
     if db_hit and db_hit.verified:
-        logger.info(
-            "[direction_resolver] DB 命中 verified: %s -> %s",
-            fund_name, db_hit.direction,
-        )
+        # manual 人工确认 = 最高优先级，任何 AI/规则不得覆盖
+        if db_hit.classification_source == "manual":
+            logger.info(
+                "[direction_resolver] DB 命中 verified manual: %s -> %s (锁死)",
+                fund_name, db_hit.direction,
+            )
+        else:
+            logger.info(
+                "[direction_resolver] DB 命中 verified: %s -> %s",
+                fund_name, db_hit.direction,
+            )
         return ClassificationResult(
             direction=db_hit.direction,
             confidence=db_hit.confidence,

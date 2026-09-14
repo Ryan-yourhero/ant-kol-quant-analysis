@@ -148,25 +148,33 @@ def filter_funds_to_process(
 
     out: List[Tuple[str, Dict[str, Any]]] = []
     for norm, info in funds.items():
-        snap = db_hits.get(norm)
-        if only_unresolved:
-            # 命中 + verified=True → 跳过
-            if snap and snap.verified:
-                continue
-            out.append((norm, info))
-        elif retry_failed:
-            # 命中 + next_reverify_at 已过 OR needs_reverify=True
-            if snap and snap.next_reverify_at and snap.next_reverify_at > now and not snap.needs_reverify:
-                continue
-            if snap and snap.verified and not snap.needs_reverify:
-                continue
-            out.append((norm, info))
-        else:
-            # 默认：跳过已有 verified 记录；未命中或 verified=False 走补全
-            if snap and snap.verified:
-                continue
-            out.append((norm, info))
-    return out
+            snap = db_hits.get(norm)
+            if only_unresolved:
+                # 命中 + verified=True → 跳过
+                if snap and snap.verified:
+                    continue
+                out.append((norm, info))
+            elif retry_failed:
+                # 命中 + next_reverify_at 已过 OR needs_reverify=True
+                if snap and snap.next_reverify_at and snap.next_reverify_at > now and not snap.needs_reverify:
+                    continue
+                if snap and snap.verified and not snap.needs_reverify:
+                    continue
+                out.append((norm, info))
+            else:
+                # 默认：跳过已有 verified 记录；未命中或 verified=False 走补全
+                if snap and snap.verified:
+                    continue
+                out.append((norm, info))
+    # 二次过滤：manual 锁死 — 人工确认的基金禁止任何 backfill 覆盖
+    filtered = []
+    for norm, info in out:
+        snap = repo.lookup_fund(info["fund_name"], fund_code=info.get("fund_code"))
+        if snap and snap.classification_source == "manual" and snap.verified:
+            logger.info("backfill 跳过 manual verified: %s", info["fund_name"])
+            continue
+        filtered.append((norm, info))
+    return filtered
 
 
 # ============================================================

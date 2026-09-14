@@ -11,23 +11,23 @@
         <span v-if="status.error" style="color: #f56c6c; font-size: 13px;">{{ status.error }}</span>
       </div>
       <div v-if="status.logs && status.logs.length" class="log-box">
-        <div class="log-head">
-          <span>采集日志</span>
-          <span class="log-tip">滚动查看最新进度</span>
-        </div>
-        <div class="log-body">
-          <div v-for="(line, i) in status.logs" :key="i" class="log-line">{{ line }}</div>
-        </div>
+      <div class="log-head">
+        <span>采集日志</span>
+        <span class="log-tip">滚动查看最新进度（共 {{ status.logs.length }} 条）</span>
+      </div>
+      <div class="log-body" ref="logBodyRef">
+        <div v-for="(line, i) in status.logs" :key="i" class="log-line">{{ line }}</div>
       </div>
     </div>
+      </div>
 
     <div class="card">
       <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
-        <span>AI 报告生成历史</span>
+        <span>任务记录</span>
         <div style="display: flex; gap: 8px;">
           <button class="btn btn-default btn-sm" @click="refreshReports">刷新</button>
           <button class="btn btn-primary btn-sm" :disabled="reportStatus.status === 'generating'" @click="generateAllReports">
-            {{ reportStatus.status === 'generating' ? '生成中...' : '生成全部历史报告' }}
+            {{ reportStatus.status === 'generating' ? '生成中...' : 'AI报告生成全部历史报告' }}
           </button>
         </div>
       </div>
@@ -52,8 +52,9 @@
                 <span v-else style="color: #909399;">未生成</span>
               </td>
               <td>
-                <button class="btn btn-default btn-sm" :disabled="reportStatus.status === 'generating'" @click="generateOne(r.date)">生成</button>
-                <button v-if="r.has_report" class="btn btn-default btn-sm" @click="viewReport(r)">查看</button>
+                <button v-if="r.has_report" class="btn btn-default btn-sm with-gap" @click="viewReport(r)">查看AI报告</button>
+                <button class="btn btn-default btn-sm with-gap" @click="viewRawOps(r)">查看原始交易记录</button>
+                <button v-if="r.has_report" class="btn btn-primary btn-sm with-gap" :disabled="reportStatus.status === 'generating'" @click="generateOne(r.date)">重新生成报告</button>
               </td>
             </tr>
           </tbody>
@@ -68,6 +69,51 @@
           <button class="btn btn-default btn-sm" @click="viewing = null">关闭</button>
         </div>
         <div class="report-content" v-html="viewingHtml"></div>
+      </div>
+    </div>
+
+    <div v-if="viewingOps" class="modal-mask" @click.self="viewingOps = null">
+      <div class="modal" style="max-width: 1400px;">
+        <div class="modal-head">
+          <span>{{ viewingOps.date }} 原始交易记录（共 {{ viewingOps.items.length }} 条）</span>
+          <button class="btn btn-default btn-sm" @click="viewingOps = null">关闭</button>
+        </div>
+        <div class="report-content" style="padding: 0;">
+          <div v-if="!viewingOps.items.length" style="color: #909399; padding: 16px;">该日期暂无交易记录</div>
+          <table v-else style="width: 100%; font-size: 13px;">
+            <thead>
+              <tr style="background: #f5f7fa;">
+                <th style="padding: 6px 8px; text-align: center; border-bottom: 1px solid #ebeef5; width: 50px;">序号</th>
+                <th style="padding: 6px 8px; text-align: left; border-bottom: 1px solid #ebeef5;">大V</th>
+                <th style="padding: 6px 8px; text-align: left; border-bottom: 1px solid #ebeef5; width: 60px;">时间</th>
+                <th style="padding: 6px 8px; text-align: left; border-bottom: 1px solid #ebeef5; width: 80px;">操作</th>
+                <th style="padding: 6px 8px; text-align: left; border-bottom: 1px solid #ebeef5;">基金</th>
+                <th style="padding: 6px 8px; text-align: left; border-bottom: 1px solid #ebeef5;">方向</th>
+                <th style="padding: 6px 8px; text-align: right; border-bottom: 1px solid #ebeef5;">买入金额</th>
+                <th style="padding: 6px 8px; text-align: right; border-bottom: 1px solid #ebeef5;">卖出份额</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(op, idx) in viewingOps.items" :key="op.id">
+                <td style="padding: 4px 8px; border-bottom: 1px solid #ebeef5; text-align: center; color: #909399;">{{ idx + 1 }}</td>
+                <td style="padding: 4px 8px; border-bottom: 1px solid #ebeef5;">{{ op.kol_name || '-' }}</td>
+                <td style="padding: 4px 8px; border-bottom: 1px solid #ebeef5;">{{ op.publish_time || '' }}</td>
+                <td style="padding: 4px 8px; border-bottom: 1px solid #ebeef5;">
+                  <span style="color: #52c41a;" v-if="['买入','定投'].includes(op.operation_type)">{{ op.operation_type }}</span>
+                  <span style="color: #f56c6c;" v-else-if="op.operation_type === '卖出'">{{ op.operation_type }}{{ op.remark === '转换' ? '(转换)' : '' }}</span>
+                  <span v-else>{{ op.operation_type }}</span>
+                </td>
+                <td style="padding: 4px 8px; border-bottom: 1px solid #ebeef5; max-width: 480px; word-break: break-all;">{{ op.fund_name }}</td>
+                <td style="padding: 4px 8px; border-bottom: 1px solid #ebeef5;">
+                  <span v-if="op.direction" :style="directionStyle(op.direction)">{{ op.direction }}</span>
+                  <span v-else style="color: #c0c4cc;">-</span>
+                </td>
+                <td style="padding: 4px 8px; text-align: right; border-bottom: 1px solid #ebeef5;">{{ op.buy_amount || '-' }}</td>
+                <td style="padding: 4px 8px; text-align: right; border-bottom: 1px solid #ebeef5;">{{ op.sell_shares || '-' }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
 
@@ -140,9 +186,9 @@
 </template>
 
 <script>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { marked } from 'marked'
-import { startRun as apiStart, getCurrentRun, getTodayOps, downloadExcel, getReports, generateReports, getReportContent } from '../utils/api.js'
+import { startRun as apiStart, getCurrentRun, getTodayOps, downloadExcel, getReports, generateReports, getReportContent, getOpsByDate } from '../utils/api.js'
 
 marked.setOptions({ breaks: true, gfm: true })
 
@@ -157,6 +203,8 @@ export default {
     const reports = ref([])
     const reportStatus = ref({ status: 'idle' })
     const viewing = ref(null)
+    const viewingOps = ref(null)
+    const logBodyRef = ref(null)
     let timer = null
     let reportTimer = null
 
@@ -164,6 +212,25 @@ export default {
       if (!viewing.value) return ''
       return marked.parse(viewing.value.content || '')
     })
+
+    const DIRECTION_COLOR = {
+      '港股方向': '#5b8cff',
+      '黄金': '#d4a017',
+      '债券': '#67c23a',
+      'CPO/光模块': '#f56c6c',
+      '半导体/科创芯片': '#e6a23c',
+      '创新药/医药': '#9b59b6',
+      '全球科技/QDII': '#409eff',
+      '白酒/消费': '#a87f0a',
+      '资源/有色金属': '#909399',
+      '量化/全市场': '#13c2c2',
+      '固收+/股债混合': '#5b8cff',
+      '其他/待分类': '#c0c4cc',
+    }
+    function directionStyle(d) {
+      const c = DIRECTION_COLOR[d] || '#606266'
+      return `color: ${c}; font-weight: 500;`
+    }
 
     const isRunning = computed(() => status.value.status !== 'idle' && status.value.status !== 'success' && status.value.status !== 'failed')
 
@@ -187,7 +254,17 @@ export default {
 
     function pollStatus() {
       getCurrentRun().then(r => {
+        const newLogs = r.data.logs
+        const prevLen = (status.value && status.value.logs) ? status.value.logs.length : 0
         status.value = r.data
+        // 日志增长时，自动滚动到底部（最新一行可见）
+        if (newLogs && newLogs.length > prevLen && logBodyRef.value) {
+          nextTick(() => {
+            if (logBodyRef.value) {
+              logBodyRef.value.scrollTop = logBodyRef.value.scrollHeight
+            }
+          })
+        }
         const s = r.data.status
         if (s === 'success') {
           loadOps(1)
@@ -202,7 +279,7 @@ export default {
       if (isRunning.value) return
       apiStart().then(r => {
         if (r.data.ok) {
-          timer = setInterval(pollStatus, 2000)
+          timer = setInterval(pollStatus, 1000)
           status.value = { status: 'crawling', message: '正在启动...' }
         } else {
           alert(r.data.message)
@@ -263,11 +340,20 @@ export default {
       }).catch(() => {})
     }
 
+    function viewRawOps(item) {
+      getOpsByDate(item.date).then(r => {
+        const items = (r.data && r.data.items) || []
+        viewingOps.value = { date: item.date, items }
+      }).catch(() => {
+        viewingOps.value = { date: item.date, items: [] }
+      })
+    }
+
     onMounted(() => {
       loadOps(1)
       pollStatus()
       refreshReports()
-      if (isRunning.value) { timer = setInterval(pollStatus, 2000) }
+      if (isRunning.value) { timer = setInterval(pollStatus, 1000) }
     })
 
     onUnmounted(() => {
@@ -275,7 +361,7 @@ export default {
       if (reportTimer) clearInterval(reportTimer)
     })
 
-    return { status, ops, page, oTotal, summary, expanded, reports, reportStatus, viewing, viewingHtml, isRunning, statusText, statusClass, maxPage, startRun, loadOps, downloadExcel, refreshReports, generateAllReports, generateOne, viewReport }
+    return { status, ops, page, oTotal, summary, expanded, reports, reportStatus, viewing, viewingOps, viewingHtml, isRunning, statusText, statusClass, maxPage, logBodyRef, directionStyle, startRun, loadOps, downloadExcel, refreshReports, generateAllReports, generateOne, viewReport, viewRawOps }
   }
 }
 </script>

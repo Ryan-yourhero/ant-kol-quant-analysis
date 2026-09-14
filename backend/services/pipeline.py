@@ -39,7 +39,7 @@ _current_status: Dict[str, Any] = {
 }
 
 # 日志保留行数（避免前端数据过大）
-MAX_LOG_LINES = 30
+MAX_LOG_LINES = 200
 
 
 def get_current_status() -> dict:

@@ -11,6 +11,8 @@ tr:hover { background: #f0f7ff; }
 .btn-primary:disabled { background: #a0cfff; cursor: not-allowed; }
 .btn-default { background: #fff; color: #606266; border: 1px solid #dcdfe6; }
 .btn-sm { padding: 4px 12px; font-size: 12px; }
+.btn-sm.with-gap { margin-left: 12px; }
+.btn-sm.with-gap:first-child { margin-left: 0; }
 .card { background: #fff; border-radius: 8px; padding: 20px; margin-bottom: 16px; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
 .card-title { font-size: 16px; font-weight: 600; margin-bottom: 16px; color: #303133; }
 .stat-box { display: inline-flex; flex-direction: column; align-items: center; padding: 12px 24px; background: #f5f7fa; border-radius: 6px; margin-right: 12px; }
@@ -25,7 +27,7 @@ tr:hover { background: #f0f7ff; }
 .log-box { margin-top: 14px; border: 1px solid #ebeef5; border-radius: 6px; background: #fafafa; }
 .log-head { display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; border-bottom: 1px solid #ebeef5; font-size: 12px; color: #606266; font-weight: 600; background: #f5f7fa; border-radius: 6px 6px 0 0; }
 .log-tip { font-weight: 400; color: #909399; font-size: 11px; }
-.log-body { padding: 6px 12px; max-height: 130px; overflow-y: auto; font-family: 'Consolas', 'Courier New', monospace; font-size: 12px; line-height: 1.55; color: #303133; }
+.log-body { padding: 6px 12px; max-height: 320px; overflow-y: auto; font-family: 'Consolas', 'Courier New', monospace; font-size: 12px; line-height: 1.55; color: #303133; }
 .log-line { white-space: pre-wrap; word-break: break-all; }
 .log-line:last-child { color: #409eff; }
 .status-success { background: #e6f7e6; color: #52c41a; }
