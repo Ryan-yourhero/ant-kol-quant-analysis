@@ -26,7 +26,7 @@ from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import or_, and_
+from sqlalchemy import or_
 
 from backend.services import fund_direction_repo as repo
 from backend.services import direction_resolver as resolver
@@ -82,13 +82,14 @@ DIRECTION_LABEL = {
 
 
 def _status_label(item: dict) -> str:
-    """已确认 / 临时判断 / 待确认"""
+    """已确认 / 待确认（仅两档）
+
+    - 已确认：人工确认过的（verified=True）
+    - 待确认：AI 给的临时判断，或未识别方向（其他/待分类）
+    """
     if item.get("verified"):
         return "已确认"
-    direction = item.get("direction") or ""
-    if direction == "其他/待分类":
-        return "待确认"
-    return "临时判断"
+    return "待确认"
 
 
 def _enrich(item: dict) -> dict:
@@ -114,14 +115,10 @@ router = APIRouter(prefix="/funds", tags=["基金方向库"])
 @router.get("")
 def list_funds(
     keyword: Optional[str] = Query(None, description="基金名称模糊搜索"),
-    fund_code: Optional[str] = Query(None, description="基金代码精确/模糊"),
     direction: Optional[str] = Query(None, description="方向精确匹配"),
     fund_type: Optional[str] = Query(None, description="fund_type_detail 匹配"),
-    source: Optional[str] = Query(None, description="classification_source 匹配"),
-    confidence: Optional[str] = Query(None, description="confidence 匹配"),
-    status: Optional[str] = Query(None, description="状态过滤: confirmed/provisional/unconfirmed/all"),
-    evidence_period: Optional[str] = Query(None, description="证据周期"),
-    updated_date: Optional[str] = Query(None, description="updated_at 日期 (YYYY-MM-DD)"),
+    status: Optional[str] = Query(None, description="状态过滤: confirmed/unconfirmed/all"),
+    created_date: Optional[str] = Query(None, description="first_seen_at 日期 (YYYY-MM-DD)"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
 ):
@@ -141,51 +138,24 @@ def list_funds(
                 FundDirectionMaster.fund_name.like(f"%{kw}%"),
                 FundDirectionMaster.normalized_name.like(f"%{norm}%"),
             ))
-        if fund_code:
-            q = q.filter(FundDirectionMaster.fund_code == fund_code.strip())
         if direction:
             q = q.filter(FundDirectionMaster.direction == direction.strip())
         if fund_type:
             q = q.filter(FundDirectionMaster.fund_type_detail == fund_type.strip())
-        if source:
-            q = q.filter(FundDirectionMaster.classification_source == source.strip())
-        if confidence:
-            q = q.filter(FundDirectionMaster.confidence == confidence.strip())
         if status == "confirmed":
             q = q.filter(FundDirectionMaster.verified == True)  # noqa: E712
-        elif status == "provisional":
-            q = q.filter(
-                and_(
-                    FundDirectionMaster.verified == False,  # noqa: E712
-                    FundDirectionMaster.direction != "其他/待分类",
-                )
-            )
         elif status == "unconfirmed":
-            q = q.filter(
-                and_(
-                    FundDirectionMaster.verified == False,  # noqa: E712
-                    FundDirectionMaster.direction == "其他/待分类",
-                )
-            )
-        elif status == "manual":
-            q = q.filter(
-                and_(
-                    FundDirectionMaster.classification_source == "manual",
-                    FundDirectionMaster.verified == True,  # noqa: E712
-                )
-            )
-        if evidence_period:
-            q = q.filter(FundDirectionMaster.evidence_period == evidence_period.strip())
-        if updated_date:
+            q = q.filter(FundDirectionMaster.verified == False)  # noqa: E712
+        if created_date:
             try:
-                d = datetime.strptime(updated_date, "%Y-%m-%d").date()
-                q = q.filter(FundDirectionMaster.updated_at >= d)
+                d = datetime.strptime(created_date, "%Y-%m-%d").date()
+                q = q.filter(FundDirectionMaster.first_seen_at >= d)
             except ValueError:
                 pass
 
         total = q.count()
         rows = (
-            q.order_by(desc(FundDirectionMaster.updated_at), desc(FundDirectionMaster.id))
+            q.order_by(desc(FundDirectionMaster.first_seen_at), desc(FundDirectionMaster.id))
             .offset((page - 1) * page_size)
             .limit(page_size)
             .all()
@@ -199,9 +169,7 @@ def list_funds(
             "filters": {
                 "direction": sorted(DIRECTION_LABEL.keys()),
                 "fund_type": sorted(FUND_TYPE_LABEL.keys()),
-                "source": sorted(SOURCE_LABEL.keys()),
-                "confidence": sorted(CONFIDENCE_LABEL.keys()),
-                "status": ["confirmed", "provisional", "unconfirmed", "manual", "all"],
+                "status": ["confirmed", "unconfirmed", "all"],
             },
         }
     finally:
@@ -212,13 +180,10 @@ def list_funds(
 @router.get("/export")
 def export_funds(
     keyword: Optional[str] = Query(None),
-    fund_code: Optional[str] = Query(None),
     direction: Optional[str] = Query(None),
     fund_type: Optional[str] = Query(None),
-    source: Optional[str] = Query(None),
-    confidence: Optional[str] = Query(None),
     status: Optional[str] = Query(None),
-    evidence_period: Optional[str] = Query(None),
+    created_date: Optional[str] = Query(None),
     page_size: int = Query(500, ge=1, le=2000),
 ):
     """按当前筛选条件导出基金方向为 JSON（每行一条，含核心可编辑字段）。"""
@@ -237,26 +202,20 @@ def export_funds(
                 FundDirectionMaster.fund_name.like(f"%{kw}%"),
                 FundDirectionMaster.normalized_name.like(f"%{norm}%"),
             ))
-        if fund_code:
-            q = q.filter(FundDirectionMaster.fund_code == fund_code.strip())
         if direction:
             q = q.filter(FundDirectionMaster.direction == direction.strip())
         if fund_type:
             q = q.filter(FundDirectionMaster.fund_type_detail == fund_type.strip())
-        if source:
-            q = q.filter(FundDirectionMaster.classification_source == source.strip())
-        if confidence:
-            q = q.filter(FundDirectionMaster.confidence == confidence.strip())
         if status == "confirmed":
             q = q.filter(FundDirectionMaster.verified == True)  # noqa: E712
-        elif status == "provisional":
-            q = q.filter(and_(FundDirectionMaster.verified == False, FundDirectionMaster.direction != "其他/待分类"))  # noqa: E712
         elif status == "unconfirmed":
-            q = q.filter(and_(FundDirectionMaster.verified == False, FundDirectionMaster.direction == "其他/待分类"))  # noqa: E712
-        elif status == "manual":
-            q = q.filter(and_(FundDirectionMaster.classification_source == "manual", FundDirectionMaster.verified == True))  # noqa: E712
-        if evidence_period:
-            q = q.filter(FundDirectionMaster.evidence_period == evidence_period.strip())
+            q = q.filter(FundDirectionMaster.verified == False)  # noqa: E712
+        if created_date:
+            try:
+                d = datetime.strptime(created_date, "%Y-%m-%d").date()
+                q = q.filter(FundDirectionMaster.first_seen_at >= d)
+            except ValueError:
+                pass
 
         rows = q.order_by(desc(FundDirectionMaster.id)).limit(page_size).all()
         items = []
@@ -410,9 +369,7 @@ def get_options():
         "confidence": [{"value": k, "label": v} for k, v in CONFIDENCE_LABEL.items()],
         "status": [
             {"value": "confirmed", "label": "已确认"},
-            {"value": "provisional", "label": "临时判断"},
             {"value": "unconfirmed", "label": "待确认"},
-            {"value": "manual", "label": "已人工确认"},
             {"value": "all", "label": "全部"},
         ],
     }

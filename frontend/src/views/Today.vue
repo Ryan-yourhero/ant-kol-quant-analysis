@@ -10,25 +10,24 @@
         <span v-if="status.message" style="color: #909399; font-size: 13px;">{{ status.message }}</span>
         <span v-if="status.error" style="color: #f56c6c; font-size: 13px;">{{ status.error }}</span>
       </div>
-      <div v-if="status.logs && status.logs.length" class="log-box">
-      <div class="log-head">
-        <span>采集日志</span>
-        <span class="log-tip">滚动查看最新进度（共 {{ status.logs.length }} 条）</span>
+      <div v-if="status.status === 'crawling'" style="color: #409eff; font-size: 13px; margin-top: 4px;">
+        正在采集第 <b>{{ currentPage }}</b> 页的数据…
       </div>
-      <div class="log-body" ref="logBodyRef">
-        <div v-for="(line, i) in status.logs" :key="i" class="log-line">{{ line }}</div>
+      <div v-if="status.status === 'success' || status.status === 'failed'"
+           :style="status.status === 'failed' ? 'color: #f56c6c;' : 'color: #52c41a;'"
+           style="font-size: 13px; margin-top: 4px;">
+        <span v-if="status.status === 'success'">采集完成</span>
+        <span v-else>采集失败</span>
+        <span v-if="status.message"> · {{ status.message }}</span>
+        <span v-if="status.error"> · {{ status.error }}</span>
       </div>
     </div>
-      </div>
 
     <div class="card">
       <div class="card-title" style="display: flex; justify-content: space-between; align-items: center;">
         <span>任务记录</span>
         <div style="display: flex; gap: 8px;">
           <button class="btn btn-default btn-sm" @click="refreshReports">刷新</button>
-          <button class="btn btn-primary btn-sm" :disabled="reportStatus.status === 'generating'" @click="generateAllReports">
-            {{ reportStatus.status === 'generating' ? '生成中...' : 'AI报告生成全部历史报告' }}
-          </button>
         </div>
       </div>
       <div v-if="reportStatus.status === 'generating'" style="margin-bottom: 12px; color: #409eff; font-size: 13px;">
@@ -76,11 +75,20 @@
       <div class="modal" style="max-width: 1400px;">
         <div class="modal-head">
           <span>{{ viewingOps.date }} 原始交易记录（共 {{ viewingOps.items.length }} 条）</span>
-          <button class="btn btn-default btn-sm" @click="viewingOps = null">关闭</button>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn btn-sm"
+                    :class="groupByDirection ? 'btn-primary' : 'btn-default'"
+                    @click="groupByDirection = !groupByDirection">
+              {{ groupByDirection ? '✓ 按方向排列' : '按方向排列' }}
+            </button>
+            <button class="btn btn-default btn-sm" @click="viewingOps = null">关闭</button>
+          </div>
         </div>
         <div class="report-content" style="padding: 0;">
           <div v-if="!viewingOps.items.length" style="color: #909399; padding: 16px;">该日期暂无交易记录</div>
-          <table v-else style="width: 100%; font-size: 13px;">
+
+          <!-- 默认视图：按采集顺序 -->
+          <table v-else-if="!groupByDirection" style="width: 100%; font-size: 13px;">
             <thead>
               <tr style="background: #f5f7fa;">
                 <th style="padding: 6px 8px; text-align: center; border-bottom: 1px solid #ebeef5; width: 50px;">序号</th>
@@ -113,6 +121,54 @@
               </tr>
             </tbody>
           </table>
+
+          <!-- 按方向排列：同方向放一起 -->
+          <div v-else>
+            <div v-if="!groupedOps.length" style="color: #909399; padding: 16px;">该日期暂无交易记录</div>
+            <table v-for="g in groupedOps" :key="g.direction"
+                   style="width: 100%; font-size: 13px; margin-bottom: 12px; border: 1px solid #ebeef5;">
+              <thead>
+                <tr style="background: #f0f4fa;">
+                  <th :colspan="8"
+                      style="padding: 8px 12px; text-align: left; border-bottom: 1px solid #ebeef5;">
+                    <span :style="directionStyle(g.direction)" style="font-size: 14px;">{{ g.direction || '其他/待分类' }}</span>
+                    <span style="color: #909399; font-weight: normal; margin-left: 12px; font-size: 12px;">
+                      共 {{ g.items.length }} 条 · 大V {{ g.kolCount }} 人
+                    </span>
+                  </th>
+                </tr>
+                <tr style="background: #f5f7fa;">
+                  <th style="padding: 4px 8px; text-align: center; border-bottom: 1px solid #ebeef5; width: 50px;">序号</th>
+                  <th style="padding: 4px 8px; text-align: left; border-bottom: 1px solid #ebeef5;">大V</th>
+                  <th style="padding: 4px 8px; text-align: left; border-bottom: 1px solid #ebeef5; width: 60px;">时间</th>
+                  <th style="padding: 4px 8px; text-align: left; border-bottom: 1px solid #ebeef5; width: 80px;">操作</th>
+                  <th style="padding: 4px 8px; text-align: left; border-bottom: 1px solid #ebeef5;">基金</th>
+                  <th style="padding: 4px 8px; text-align: left; border-bottom: 1px solid #ebeef5;">方向</th>
+                  <th style="padding: 4px 8px; text-align: right; border-bottom: 1px solid #ebeef5;">买入金额</th>
+                  <th style="padding: 4px 8px; text-align: right; border-bottom: 1px solid #ebeef5;">卖出份额</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(op, idx) in g.items" :key="op.id">
+                  <td style="padding: 4px 8px; border-bottom: 1px solid #ebeef5; text-align: center; color: #909399;">{{ idx + 1 }}</td>
+                  <td style="padding: 4px 8px; border-bottom: 1px solid #ebeef5;">{{ op.kol_name || '-' }}</td>
+                  <td style="padding: 4px 8px; border-bottom: 1px solid #ebeef5;">{{ op.publish_time || '' }}</td>
+                  <td style="padding: 4px 8px; border-bottom: 1px solid #ebeef5;">
+                    <span style="color: #52c41a;" v-if="['买入','定投'].includes(op.operation_type)">{{ op.operation_type }}</span>
+                    <span style="color: #f56c6c;" v-else-if="op.operation_type === '卖出'">{{ op.operation_type }}{{ op.remark === '转换' ? '(转换)' : '' }}</span>
+                    <span v-else>{{ op.operation_type }}</span>
+                  </td>
+                  <td style="padding: 4px 8px; border-bottom: 1px solid #ebeef5; max-width: 480px; word-break: break-all;">{{ op.fund_name }}</td>
+                  <td style="padding: 4px 8px; border-bottom: 1px solid #ebeef5;">
+                    <span v-if="op.direction" :style="directionStyle(op.direction)">{{ op.direction }}</span>
+                    <span v-else style="color: #c0c4cc;">-</span>
+                  </td>
+                  <td style="padding: 4px 8px; text-align: right; border-bottom: 1px solid #ebeef5;">{{ op.buy_amount || '-' }}</td>
+                  <td style="padding: 4px 8px; text-align: right; border-bottom: 1px solid #ebeef5;">{{ op.sell_shares || '-' }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     </div>
@@ -204,13 +260,36 @@ export default {
     const reportStatus = ref({ status: 'idle' })
     const viewing = ref(null)
     const viewingOps = ref(null)
+    const groupByDirection = ref(false)
     const logBodyRef = ref(null)
+    const currentPage = ref(0)  // 当前采集的页数（从 logs 解析 "页面N"）
     let timer = null
     let reportTimer = null
 
     const viewingHtml = computed(() => {
       if (!viewing.value) return ''
       return marked.parse(viewing.value.content || '')
+    })
+
+    // 按方向分组：方向为空归到「其他/待分类」；组间按组内大V 数 + 操作数从高到低排序
+    const groupedOps = computed(() => {
+      if (!viewingOps.value || !viewingOps.value.items) return []
+      const groups = new Map()
+      for (const op of viewingOps.value.items) {
+        const dir = op.direction || '其他/待分类'
+        if (!groups.has(dir)) groups.set(dir, [])
+        groups.get(dir).push(op)
+      }
+      const arr = Array.from(groups.entries()).map(([direction, items]) => ({
+        direction,
+        items,
+        kolCount: new Set(items.map(i => i.kol_name).filter(Boolean)).size,
+      }))
+      arr.sort((a, b) => {
+        if (b.items.length !== a.items.length) return b.items.length - a.items.length
+        return b.kolCount - a.kolCount
+      })
+      return arr
     })
 
     const DIRECTION_COLOR = {
@@ -257,13 +336,12 @@ export default {
         const newLogs = r.data.logs
         const prevLen = (status.value && status.value.logs) ? status.value.logs.length : 0
         status.value = r.data
-        // 日志增长时，自动滚动到底部（最新一行可见）
-        if (newLogs && newLogs.length > prevLen && logBodyRef.value) {
-          nextTick(() => {
-            if (logBodyRef.value) {
-              logBodyRef.value.scrollTop = logBodyRef.value.scrollHeight
-            }
-          })
+        // 从最新日志解析当前页数（main.py 输出 "# 页面N"）
+        if (newLogs && newLogs.length) {
+          for (let i = newLogs.length - 1; i >= 0; i--) {
+            const m = /#\s*页面\s*(\d+)/.exec(newLogs[i])
+            if (m) { currentPage.value = parseInt(m[1], 10); break }
+          }
         }
         const s = r.data.status
         if (s === 'success') {
@@ -306,18 +384,6 @@ export default {
       }).catch(() => {})
     }
 
-    function generateAllReports() {
-      if (reportStatus.value.status === 'generating') return
-      generateReports(null).then(r => {
-        if (r.data.ok) {
-          reportStatus.value = { status: 'generating' }
-          pollReports()
-        } else {
-          alert(r.data.message)
-        }
-      }).catch(() => {})
-    }
-
     function generateOne(date) {
       if (reportStatus.value.status === 'generating') return
       generateReports(date).then(r => {
@@ -341,6 +407,7 @@ export default {
     }
 
     function viewRawOps(item) {
+      groupByDirection.value = false
       getOpsByDate(item.date).then(r => {
         const items = (r.data && r.data.items) || []
         viewingOps.value = { date: item.date, items }
@@ -361,7 +428,7 @@ export default {
       if (reportTimer) clearInterval(reportTimer)
     })
 
-    return { status, ops, page, oTotal, summary, expanded, reports, reportStatus, viewing, viewingOps, viewingHtml, isRunning, statusText, statusClass, maxPage, logBodyRef, directionStyle, startRun, loadOps, downloadExcel, refreshReports, generateAllReports, generateOne, viewReport, viewRawOps }
+    return { status, ops, page, oTotal, summary, expanded, reports, reportStatus, viewing, viewingOps, groupByDirection, groupedOps, viewingHtml, isRunning, statusText, statusClass, maxPage, logBodyRef, currentPage, directionStyle, startRun, loadOps, downloadExcel, refreshReports, generateOne, viewReport, viewRawOps }
   }
 }
 </script>

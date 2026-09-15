@@ -24,8 +24,6 @@
       <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px;">
         <input v-model="filters.keyword" @keyup.enter="reload(1)" placeholder="基金名称"
                style="width: 180px; padding: 4px 8px; border: 1px solid #dcdfe6; border-radius: 4px;" />
-        <input v-model="filters.fund_code" @keyup.enter="reload(1)" placeholder="基金代码"
-               style="width: 100px; padding: 4px 8px; border: 1px solid #dcdfe6; border-radius: 4px;" />
         <select v-model="filters.direction" @change="reload(1)" style="padding: 4px 8px; border: 1px solid #dcdfe6; border-radius: 4px;">
           <option value="">投资方向（全部）</option>
           <option v-for="d in options.direction" :key="d.value" :value="d.value">{{ d.label }}</option>
@@ -34,21 +32,11 @@
           <option value="">基金类型（全部）</option>
           <option v-for="d in options.fund_type" :key="d.value" :value="d.value">{{ d.label }}</option>
         </select>
-        <select v-model="filters.source" @change="reload(1)" style="padding: 4px 8px; border: 1px solid #dcdfe6; border-radius: 4px;">
-          <option value="">来源（全部）</option>
-          <option v-for="d in options.source" :key="d.value" :value="d.value">{{ d.label }}</option>
-        </select>
-        <select v-model="filters.confidence" @change="reload(1)" style="padding: 4px 8px; border: 1px solid #dcdfe6; border-radius: 4px;">
-          <option value="">置信度（全部）</option>
-          <option v-for="d in options.confidence" :key="d.value" :value="d.value">{{ d.label }}</option>
-        </select>
         <select v-model="filters.status" @change="reload(1)" style="padding: 4px 8px; border: 1px solid #dcdfe6; border-radius: 4px;">
           <option value="">状态（全部）</option>
           <option v-for="d in options.status" :key="d.value" :value="d.value">{{ d.label }}</option>
         </select>
-        <input v-model="filters.evidence_period" @keyup.enter="reload(1)" placeholder="证据周期"
-               style="width: 90px; padding: 4px 8px; border: 1px solid #dcdfe6; border-radius: 4px;" />
-        <input v-model="filters.updated_date" @change="reload(1)" type="date" title="最后更新日期"
+        <input v-model="filters.created_date" @change="reload(1)" type="date" title="添加时间"
                style="width: 140px; padding: 4px 8px; border: 1px solid #dcdfe6; border-radius: 4px;" />
         <button class="btn btn-primary btn-sm" @click="reload(1)">查询</button>
         <button class="btn btn-default btn-sm" @click="resetFilters()">重置</button>
@@ -64,7 +52,7 @@
               <th>投资方向</th>
               <th>基金类型</th>
               <th>状态</th>
-              <th>证据周期</th>
+              <th>添加时间</th>
               <th style="min-width: 220px;">操作</th>
             </tr>
           </thead>
@@ -80,17 +68,12 @@
               <td>
                 <span :style="statusStyle(it.status_label)">{{ it.status_label }}</span>
               </td>
-              <td>{{ it.evidence_period || '-' }}</td>
+              <td>{{ formatTime(it.created_at) }}</td>
               <td>
                 <button v-if="it.status_label === '已确认'" class="btn btn-default btn-sm btn-row" @click="openEdit(it)">编辑</button>
                 <button v-if="it.status_label === '已确认'" class="btn btn-default btn-sm btn-row" @click="openEvidence(it)">查看依据</button>
-                <!-- manual verified → 不显示重新分析 -->
-                <button v-if="it.status_label === '临时判断'" class="btn btn-primary btn-sm btn-row" @click="quickConfirm(it)">确认</button>
-                <button v-if="it.status_label === '临时判断'" class="btn btn-default btn-sm btn-row" @click="openEdit(it)">编辑</button>
-                <button v-if="it.status_label === '临时判断'" class="btn btn-default btn-sm btn-row" @click="openEvidence(it)">查看依据</button>
-                <button v-if="it.status_label === '临时判断' && it.classification_source !== 'manual'" class="btn btn-default btn-sm btn-row" @click="doReanalyze(it)">重新分析</button>
 
-                <button v-if="it.status_label === '待确认'" class="btn btn-primary btn-sm btn-row" @click="openEdit(it)">确认方向</button>
+                <button v-if="it.status_label === '待确认'" class="btn btn-primary btn-sm btn-row" @click="quickConfirm(it)">确认方向</button>
                 <button v-if="it.status_label === '待确认'" class="btn btn-default btn-sm btn-row" @click="openEdit(it)">编辑</button>
                 <button v-if="it.status_label === '待确认'" class="btn btn-default btn-sm btn-row" @click="openEvidence(it)">查看依据</button>
                 <button v-if="it.status_label === '待确认' && it.classification_source !== 'manual'" class="btn btn-default btn-sm btn-row" @click="doReanalyze(it)">重新分析</button>
@@ -107,6 +90,13 @@
         <button class="btn btn-default btn-sm" :disabled="page <= 1" @click="reload(page - 1)">上一页</button>
         <span>第 {{ page }} / {{ maxPage }} 页（共 {{ total }} 条）</span>
         <button class="btn btn-default btn-sm" :disabled="page >= maxPage" @click="reload(page + 1)">下一页</button>
+        <span style="margin-left: 12px; color: #606266;">每页</span>
+        <select v-model.number="pageSize" @change="reload(1)" style="padding: 2px 6px; border: 1px solid #dcdfe6; border-radius: 4px;">
+          <option :value="20">20</option>
+          <option :value="50">50</option>
+          <option :value="100">100</option>
+        </select>
+        <span style="color: #606266;">条</span>
       </div>
     </div>
 
@@ -153,7 +143,7 @@
           </div>
           <div style="margin-top: 16px; text-align: right; display: flex; gap: 8px; justify-content: flex-end;">
             <button class="btn btn-default btn-sm" @click="editing = null">取消</button>
-            <button class="btn btn-primary btn-sm" @click="saveEdit" :disabled="!editing.fund_name || !editing.direction">保存</button>
+            <button class="btn btn-primary btn-sm" @click="confirmEdit" :disabled="!editing.fund_name || !editing.direction">确认</button>
           </div>
         </div>
       </div>
@@ -236,8 +226,8 @@ export default {
     const filterUnconfirmedOnly = ref(false)
 
     const filters = ref({
-      keyword: '', fund_code: '', direction: '', fund_type: '',
-      source: '', confidence: '', status: '', evidence_period: '', updated_date: '',
+      keyword: '', direction: '', fund_type: '',
+      status: '', created_date: '',
     })
 
     const editing = ref(null)
@@ -264,7 +254,7 @@ export default {
     function statusStyle(s) {
       if (s === '已确认') return 'color: #52c41a; font-weight: 600;'
       if (s === '待确认') return 'color: #f56c6c;'
-      return 'color: #e6a23c;'
+      return ''
     }
 
     function reload(p) {
@@ -272,14 +262,10 @@ export default {
       const params = { page: page.value, page_size: pageSize.value }
       if (filterUnconfirmedOnly.value) params.status = 'unconfirmed'
       if (filters.value.keyword) params.keyword = filters.value.keyword
-      if (filters.value.fund_code) params.fund_code = filters.value.fund_code
       if (filters.value.direction) params.direction = filters.value.direction
       if (filters.value.fund_type) params.fund_type = filters.value.fund_type
-      if (filters.value.source) params.source = filters.value.source
-      if (filters.value.confidence) params.confidence = filters.value.confidence
       if (filters.value.status && !filterUnconfirmedOnly.value) params.status = filters.value.status
-      if (filters.value.evidence_period) params.evidence_period = filters.value.evidence_period
-      if (filters.value.updated_date) params.updated_date = filters.value.updated_date
+      if (filters.value.created_date) params.created_date = filters.value.created_date
 
       listFunds(params).then(r => {
         items.value = r.data.items || []
@@ -292,8 +278,8 @@ export default {
 
     function resetFilters() {
       filters.value = {
-        keyword: '', fund_code: '', direction: '', fund_type: '',
-        source: '', confidence: '', status: '', evidence_period: '', updated_date: '',
+        keyword: '', direction: '', fund_type: '',
+        status: '', created_date: '',
       }
       filterUnconfirmedOnly.value = false
       reload(1)
@@ -373,13 +359,10 @@ export default {
       const params = {}
       if (filterUnconfirmedOnly.value) params.status = 'unconfirmed'
       if (filters.value.keyword) params.keyword = filters.value.keyword
-      if (filters.value.fund_code) params.fund_code = filters.value.fund_code
       if (filters.value.direction) params.direction = filters.value.direction
       if (filters.value.fund_type) params.fund_type = filters.value.fund_type
-      if (filters.value.source) params.source = filters.value.source
-      if (filters.value.confidence) params.confidence = filters.value.confidence
       if (filters.value.status && !filterUnconfirmedOnly.value) params.status = filters.value.status
-      if (filters.value.evidence_period) params.evidence_period = filters.value.evidence_period
+      if (filters.value.created_date) params.created_date = filters.value.created_date
       params.page = 1
       params.page_size = 100
       axios.get('/api/funds/export', { params, responseType: 'blob' }).then(r => {
@@ -427,7 +410,7 @@ export default {
       reader.readAsText(file)
     }
 
-    function saveEdit() {
+    function confirmEdit() {
       const body = {
         fund_name: editing.value.fund_name.trim(),
         fund_code: editing.value.fund_code.trim() || null,
@@ -442,20 +425,20 @@ export default {
             editing.value = null
             reload(page.value)
           } else {
-            alert('保存失败：' + (r.data.detail || '未知'))
+            alert('确认失败：' + (r.data.detail || '未知'))
           }
         }).catch(e => {
           const detail = e.response?.data?.detail
-          alert('保存失败：' + (typeof detail === 'string' ? detail : JSON.stringify(detail || e.message)))
+          alert('确认失败：' + (typeof detail === 'string' ? detail : JSON.stringify(detail || e.message)))
         })
       } else {
-        // 新增
+        // 新增（自动进入已确认状态）
         createFund(body).then(r => {
           if (r.data.ok) {
             editing.value = null
             reload(1)
           } else {
-            alert('新增失败：' + (r.data.detail || '未知'))
+            alert('确认失败：' + (r.data.detail || '未知'))
           }
         }).catch(e => {
           const detail = e.response?.data?.detail
@@ -476,7 +459,7 @@ export default {
               }
             }
           } else {
-            alert('新增失败：' + (typeof detail === 'string' ? detail : JSON.stringify(detail || e.message)))
+            alert('确认失败：' + (typeof detail === 'string' ? detail : JSON.stringify(detail || e.message)))
           }
         })
       }
@@ -494,7 +477,7 @@ export default {
       editing, evidence, selectedIds, isAllSelected, fileInputRef,
       formatTime, statusStyle,
       reload, resetFilters,
-      openCreate, openEdit, openEvidence, quickConfirm, doReanalyze, saveEdit,
+      openCreate, openEdit, openEvidence, quickConfirm, doReanalyze, confirmEdit,
       toggleSelect, toggleSelectAll,
       exportFunds, triggerImport, onImportFile,
     }

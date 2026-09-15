@@ -76,7 +76,15 @@ def _clean_amount(v) -> Optional[str]:
 
 
 def load_records_from_excel(date_str: str) -> List[TradeRecord]:
-    """从 output/YYYYMMDD.xlsx 重建 TradeRecord 列表（成表数据）。"""
+    """从 output/YYYYMMDD.xlsx 重建 TradeRecord 列表（成表数据）。
+
+    每条记录附带 final direction（来源：fund_direction_master）：
+    - DB 命中 manual/verified=True → direction = DB.direction, source=manual, verified=True
+    - DB 命中但 verified=False    → direction = DB.direction, source=db, verified=False
+    - DB 未命中                  → direction = "待确认", source=unmapped, verified=False
+
+    真实交易不会因为未命中而被过滤；所有原始记录完整保留。
+    """
     import openpyxl
 
     cleaned = date_str.replace("-", "")
@@ -133,7 +141,81 @@ def load_records_from_excel(date_str: str) -> List[TradeRecord]:
         wb.close()
 
     logger.info("从 Excel 重建 %d 条记录（日期 %s）", len(records), cleaned)
+
+    # ---- 注入最终 direction（唯一 Source of Truth：fund_direction_master） ----
+    inject_final_directions(records)
+
     return records
+
+
+UNMAPPED_DIRECTION = "待确认"
+
+
+def inject_final_directions(records: List[TradeRecord]) -> None:
+    """为每条 record 写入 final direction / source / verified。
+
+    仅查 fund_direction_master，不调用 web_search / llm / keyword 分类。
+    未命中 → direction="待确认"，但记录本身不会被剔除。
+    """
+    from backend.services import fund_direction_repo as repo
+    from src.storage.db_storage import _get_session
+    from src.storage.models import FundDirectionMaster
+
+    # 收集唯一 (fund_name, normalized_name)
+    norm_set: set = set()
+    fund_names: List[str] = []
+    for r in records:
+        fn = (r.fund_name or "").strip()
+        if not fn:
+            continue
+        norm = repo.normalize_fund_name(fn)
+        if norm and norm not in norm_set:
+            norm_set.add(norm)
+            fund_names.append(fn)
+
+    # 批量查 DB
+    db_map: dict = {}
+    if norm_set:
+        session = _get_session()
+        try:
+            rows = (
+                session.query(FundDirectionMaster)
+                .filter(FundDirectionMaster.normalized_name.in_(list(norm_set)))
+                .all()
+            )
+            for row in rows:
+                snap = repo._detach(row)
+                db_map[snap.normalized_name] = snap
+        finally:
+            session.close()
+
+    n_mapped = 0
+    n_unmapped = 0
+    for r in records:
+        fn = (r.fund_name or "").strip()
+        if not fn:
+            r.direction = UNMAPPED_DIRECTION
+            r.direction_source = "unmapped"
+            r.direction_verified = False
+            n_unmapped += 1
+            continue
+        norm = repo.normalize_fund_name(fn)
+        snap = db_map.get(norm) if norm else None
+        if snap and snap.direction:
+            r.direction = snap.direction
+            r.direction_source = snap.classification_source or "db"
+            r.direction_verified = bool(snap.verified)
+            n_mapped += 1
+        else:
+            r.direction = UNMAPPED_DIRECTION
+            r.direction_source = "unmapped"
+            r.direction_verified = False
+            n_unmapped += 1
+
+    logger.info(
+        "方向注入完成: 命中 %d / 未命中 %d（未命中→%s，但交易保留）",
+        n_mapped, n_unmapped, UNMAPPED_DIRECTION,
+    )
 
 
 def _load_crawl_status(date_str: str) -> dict:
@@ -259,11 +341,27 @@ def _generate_one(date_str: str):
     except Exception as e:
         logger.warning("[REPORT] %s 历史上下文构建失败（降级为无历史对比）: %s", date_str, e)
 
-    # 数据完整性（爬虫元数据），独立于历史聚合，总是注入
+    # 数据完整性（爬虫元数据）：正常采集下完全不传给 LLM；只有异常才注入 data_warning。
     crawl_status = _load_crawl_status(date_str)
     if historical_context is None:
         historical_context = {}
-    historical_context["crawl_status"] = crawl_status
+    if crawl_status.get("integrity") == "complete":
+        # 正常采集：LLM 完全不知道 crawl_status；也不会出现任何"数据完整性"相关术语
+        historical_context.pop("crawl_status", None)
+        historical_context.pop("data_warning", None)
+    else:
+        # 异常采集：注入面向 LLM 的中文警告
+        historical_context.pop("crawl_status", None)
+        stop_type = crawl_status.get("stop_type", "unknown")
+        expand_remaining = crawl_status.get("expand_remaining", 0)
+        msg = "本次采集可能不完整"
+        if stop_type == "max_scroll":
+            msg += "（达到最大滚动次数）"
+        elif stop_type == "stuck":
+            msg += "（页面卡住）"
+        elif expand_remaining and expand_remaining > 0:
+            msg += f"（仍有 {expand_remaining} 个未处理的展开按钮）"
+        historical_context["data_warning"] = msg
 
     path = analyze_daily(
         records,

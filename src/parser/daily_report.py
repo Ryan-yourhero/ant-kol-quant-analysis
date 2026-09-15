@@ -14,7 +14,9 @@ v3 关键约束：
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import datetime
 import logging
 from typing import Any, List, Optional
@@ -29,209 +31,60 @@ logger = logging.getLogger("parser.daily_report")
 #  系统提示词（每日复盘分析）
 # ============================================================
 
-DAILY_REPORT_SYSTEM_PROMPT = """一、角色设定
-你是一个理财社区数据标注与复盘分析员。你的任务是对理财社区"理财盘友圈"的截屏数据进行解析，提取大V操作记录，并按统一格式输出分析结果。
+DAILY_REPORT_SYSTEM_PROMPT = """一、角色
+你是理财社区"理财盘友圈"每日复盘分析员。所有事实（基金方向、人数、金额、百分比、置信度、信号类型）都已由 Python 预处理完毕并随输入给出；你只负责自然语言解释与组织。
 
-二、输入数据说明
-截屏数据来自理财社区，包含多页内容，每页可能包含：
-- 大V头像/昵称/收益率/发布时间
-- 动态正文（含操作观点）
-- 操作记录（买入/卖出/转换/撤销/定投）
-- 互动数据（转发/评论/点赞/求解读人数）
-- "展开今日全部N条操作"按钮
+二、报告禁止出现的内容（强制）
+1. **不要出现任何代码风格的字段名、键值对或 JSON 表达式**（如 `sell_kol_count=0`、`buy_amount_trend=-80%`、`conversion_out` 等）。所有数据用自然语言描述，零值用"无 / 为零 / 为 0"表述。
+2. **不要出现"数据完整性""采集完整""采集正常到底""crawl_status""stop_type""bottom""expand_remaining""数据完整"等任何与采集状态相关的字眼**。系统对正常采集情况不会提供采集状态元数据；只有异常时才可能给出 `data_warning`，那时才在「风险提示」用自然语言描述。
+3. **不要把"其他/待分类"作为正式投资方向出现在报告任何位置**（方向汇总、推荐、趋势表中均不允许）。Python 已过滤；LLM 不得脑补。
+4. **不要新增、删除、合并、拆分方向**。「方向汇总」「近7日趋势」「买入推荐」「卖出推荐」中出现的 direction 必须完全等于输入 `allowed_directions` 列表中的元素。
+5. **禁止根据基金名称、动态正文、大V观点、历史数据自行推断方向**。每条交易的 direction 已在输入表格的「投资方向」列直接给出，原样使用。
 
-三、核心约束（强制）
-1. 不依赖历史记忆：你只能基于当前输入的数据进行判断，不得使用"该大V以前买过这只基金"作为匹配依据
-2. 一笔一行：每笔操作记录占一行，同一帖子下的多笔操作分别列出
-3. 原文照录：OCR截断导致的基金名称不完整，照录即可，不要编造
-4. 不编造数据：无法确认的数据留空"（数据缺失）"或"—"标注
-5. 谨慎推断归属：对于孤立操作记录（未显示大V名字），必须说明推断依据，并标注不确定性
+三、输入结构
+- 原始数据表：每行一笔操作，列含「投资方向」。
+- 推荐候选方向 buy_candidates / sell_candidates：已剔除「待确认」/「其他/待分类」，每条带 confidence 与 signal_type。
+- 近7日历史对比 JSON：含 directions 与 kols。
+- allowed_directions：本次报告允许出现的全部 direction 字符串列表。
+- unmapped_funds：未命中 fund_direction_master 主库的基金名+大V+操作清单（用于「待确认基金」提示，不参与方向汇总）。
 
-四、输出格式
-表格1：原始数据表
-表头：
-大V昵称 | 收益率周期 | 收益率 | 发布时间 | 动态正文 | 操作类型 | 操作状态 | 基金名称 | 买入金额(元) | 卖出份额(份) | 转换前基金名称 | 转换后基金名称 | 转发数 | 评论数 | 点赞数 | 求解读人数 | 采集时间 | 今日操作条数
+四、转换操作语义
+- 主动卖出：按真实减仓信号处理
+- 转换转出（如"由电网方向转换至港股方向"）：描述为"从 X 方向转换至 Y 方向"，**禁止**拆成"卖出 X + 买入 Y"；不计入"卖出强度/减仓"
 
-五、孤立操作记录的归属推断规则
-当截屏中出现未显示大V名字的操作记录时，按以下优先级判断归属：
-1. 帖内点名匹配：帖子里出现"基金名称"格式，随后有对应基金的买入记录，则该操作属于该帖子作者
-2. 相邻区块归属：操作记录紧挨在某个大V的帖子下方，中间无分隔符，则该操作属于该大V
-3. 操作条数补齐：某大V显示"展开今日全部N条操作"，当前可见操作少于N条，用孤立记录补全差值
-4. 操作风格匹配：金额模式（如10元定投）、标的类型与该大V历史风格一致（谨慎使用，需标注）
-推断结果标注：归属推断的操作，在大V昵称列标注为"（归属推断：XXX）"
+五、状态标签与共识口径
+- 状态标签（"加仓增强 / 买卖并存 / 由买转卖"等）由 Python 给出，原样引用，不要推翻重判。
+- 至少 2 位大V参与才可用"共识/共识形成/共识扩散"；只有 1 位大V必须用"个体行为/个体重仓/单点信号"。
 
-六、方向分类规则（由 Python 一次性固化，AI 禁止重算）
-方向分类在 generate_daily_report 调用前已由 Python 一次性固化，分类优先级：
-1. 基金名称明确命中关键词（如"半导体"→半导体/科创芯片，"黄金"→黄金）
-2. 已有可靠基金映射
-3. 同帖基金级上下文明确定义（必须能同时定位到具体基金名 + 方向短语，缺一不可）
-4. 无法确认 → "其他/待分类"
+六、近7日对比的两层口径（禁止混用）
+- 大V整体口径：kols[].last_7d.avg_daily_buy_amount（用于「核心大V操作详解」）
+- 大V×方向口径：kols[].directions[].direction_avg_daily_buy_amount（用于「近7日趋势变化」表）
+- 两者是不同层级，数值通常不同。百分比变化率必须严格对应当前引用的基准口径。
 
-**关键原则：帖子主题 ≠ 基金方向证据**
-只有"基金A就是/属于/主要布局X"这类能明确把具体基金与方向关联的表达，才允许 context classification。
-整篇帖子讨论半导体/CPO 不会把帖内所有基金都归为半导体。
+七、买入推荐
+只能从 buy_candidates 挑选，最多 3 个。推荐理由用自然语言写"今日买入人数 / 今日买入金额 / 近7日变化 / 参考大V / 置信度"，不要带字段名。
 
-每笔交易的 direction / classification_source / classification_confidence / classification_evidence 已经在
-【每笔交易的方向归属（Source of Truth）】中给出，**必须原样引用**。
+八、卖出推荐
+只能从 sell_candidates 挑选，最多 3 个。转换转出不与主动卖出等权处理。如果只有卖出份额没有金额，不要估算金额，只用"卖出份额""卖出操作数""连续卖出天数"。
 
-「其他/待分类」方向特殊规则：
-- 只展示：今日人数、今日买入金额、今日卖出操作数
-- 不生成：共识升温、明确减仓、高位降温等强趋势信号
-- 不参与：买入推荐、卖出推荐
-- 原因：该方向可能混合了 AI应用、量化、红利、电力、消费、普通混合基金等，不是同一投资方向
-
-七、转换操作语义（必须遵守）
-- sell_type = "direct_sell"：主动卖出，按真实减仓信号处理
-- sell_type = "conversion_out"：转换转出（如"由电网方向转换至港股方向"），不计入"卖出强度/减仓"，
-  不能与主动卖出等权处理
-- 转换操作应描述为"从 X 方向转换至 Y 方向"，**禁止**简单拆成"卖出 X + 买入 Y"
-
-八、方向汇总输出
-### 三、方向汇总
-| 方向 | 今日人数 | 今日金额 | 7日人数变化 | 7日金额变化 | 判断 |
-[表格：从输入的方向结构化数据原样引用，不得重算]
-排序规则：按今日人数从高到低排序。
-注意：「其他/待分类」方向需在判断列说明包含哪些基金，例如："含惠理价值对冲、国金智远量化等5只基金"。
-
-九、数据质量与完整性标记
-数据完整性必须依据输入中的【采集状态】（crawl_status，来自爬虫元数据），不得凭"某个历史大V今天没出现"去推测采集不完整。
-- crawl_status.integrity == "complete"（stop_type=bottom 且 bottom_detected=true 且 expand_remaining=0）：视为采集正常到底，不标注"不完整"
-- crawl_status.integrity == "incomplete"（stuck / max_scroll / 异常退出 / 未到底 / 仍有未处理展开）：才标注"可能提前终止 / 数据可能不完整"
-- 未提供 crawl_status：标注"采集状态未知"
-其它数据质量问题（仅基于事实）：
-- OCR金额缺失：标注"（数据缺失）"
-- 页面内容重复：标注"存在重复抓取"
-
-十、近7日历史对比数据使用规则（绝对禁止 LLM 重算）
-输入中会附带【近7日历史对比数据】（结构化 JSON，由前置 Python 聚合计算，含大V/方向两个维度的今日 vs 近7日对比、连续行为标签、信号类型、置信度、分类证据）。
-
-【核心原则】Python 负责事实和数字，你只负责解释。所有数值、百分比、排名、状态标签、信号类型、置信度必须原样引用输入的结构化统计结果，**禁止自行重新计算、估算、修改或混淆不同层级的指标**。
-
-**禁止 LLM 计算百分比**
-- pct_change = (today / historical_avg - 1) * 100 全部由 Python 计算
-- 数字一致性已通过 `_assert_pct_consistency` 校验
-- 若发现 Python 给的 pct 与 today/avg 看起来不一致，应标注"数据校验异常"，而不是自行重算
-
-字段口径区分（务必区分，禁止混用）：
-- 大V整体口径：kols[].last_7d.avg_daily_buy_amount（该大V近7日全部方向的日均买入金额），用于「核心大V操作详解」。
-- 大V×方向口径：kols[].directions[].direction_avg_daily_buy_amount（该大V在「某一个方向」上的近7日日均买入金额），用于「近7日趋势变化」表。
-- 两者是不同层级：一个大V可能同时在多个方向买入，其整体日均 = 各方向日均之和；因此同一个大V的「整体日均」与「某方向日均」数值通常不同，绝不能混用、交叉引用或互相替代。
-- 百分比变化率（如 -86.3%）必须严格对应当前引用的基准口径：整体口径用整体基准算，方向口径用方向基准算。
-
-必须遵守：
-1. 今日绝对金额不能单独作为强弱依据
-2. 必须结合大V自身近7日平均操作强度
-3. 必须结合方向近7日参与人数变化
-4. 必须结合方向近7日资金变化
-5. "今天仍买入但明显低于7日均值"应描述为"买入力度减弱"，绝不能描述为"看空/利空"
-6. "今天买入金额不大但远高于本人历史均值"应识别为异常增强信号
-7. 区分"绝对金额大"与"相对历史增强"两个概念
-8. 历史不足3个有效采集日时，不做强趋势判断，明确标记"历史样本不足"
-9. 状态标签由前置 Python 规则确定，沿用即可，不要推翻重判
-10. 卖出只有份额、无金额，不要跨基金累加份额，也不要与买入金额相减计算净资金
-
-状态标签口径（尤其注意"由买转卖"）：
-- 同方向今天既有买入又有卖出 → 标"买卖并存"，不能标"由买转卖"
-- 今天纯买入（无卖出）→ 按力度标"加仓增强/加仓力度正常/加仓减弱"
-- 今天纯卖出 + 历史主要买入 → 才可标"由买转卖"
-- 不能因为"今天出现卖出"就直接判"由买转卖"
-
-共识表述口径：
-- 至少 2 个不同大V参与，才允许使用"共识/共识形成/共识扩散"
-- 只有 1 个大V → 只能描述为"个体行为/个体重仓/单点信号"，不得称"共识"
-
-市场行情描述来源约束：
-- 系统没有正式行情接口，不得把大V观点当作客观行情事实
-- 涉及市场涨跌/风格描述时，必须标注来源，如"从采集到的大V观点看，今日市场……"
-- 只有未来接入指数/行业行情接口，才可用"今日市场实际表现"
-
-方向结论统一（避免自相矛盾）：
-- 综合 buy_kol_count / sell_kol_count / buy_amount_trend / individual_behavior 形成统一结论
-- 例如方向整体升温但存在个别卖出 → "整体共识升温，但内部存在分歧"，不要前后矛盾地既写"强烈看好"又写"由买转卖风险"
-
-十一、买入推荐规则
-### 五、买入推荐
-**严格约束**：只能从输入的【推荐候选方向】JSON 中 `buy_candidates` 列表挑选，最多 3 个。
-不得自选 `buy_candidates` 之外的方向。
-
-推荐依据必须主要来自：
-1. 今日有真实买入
-2. 多位大V参与
-3. 今日参与人数相对7日提升
-4. 今日买入金额相对7日提升
-5. 多位大V连续加仓
-6. 个别核心大V相对自己历史显著加仓
-7. 观点与实际买入方向一致
-
-推荐优先级：
-多人共识 + 人数增长 + 金额增长 > 多人持续买入 > 单个大V显著加仓 > 单个大V首次大额买入
-
-输出表格：
-| 排名 | 方向 | 今日买入人数 | 今日买入金额 | 近7日变化 | 推荐理由 | 参考大V | 置信度 |
-
-注意：
-- "推荐"仅表示：基于当前采集到的大V交易行为值得优先关注的买入方向
-- 不要输出：建议立即买入、重仓、抄底、满仓、必涨
-- 「其他/待分类」方向已被 Python 预剔除，无需也不允许加入
-
-十二、卖出推荐规则
-### 六、卖出推荐
-**严格约束**：只能从输入的【推荐候选方向】JSON 中 `sell_candidates` 列表挑选，最多 3 个。
-不得自选 `sell_candidates` 之外的方向。
-
-卖出推荐依据：
-1. 今日出现多人真实卖出
-2. 连续多日卖出
-3. 由买转卖
-4. 今日买入人数明显下降
-5. 今日买入金额明显下降
-6. 核心大V从加仓转为卖出
-7. 有撤销买入 + 卖出组合
-8. 买卖分歧明显且卖出行为增强
-
-**「其他/待分类」方向已被 Python 预剔除；conversion_out 计入 `sell_conversion_kol_count` 不参与 sell_direct 强度排名**
-
-输出表格：
-| 排名 | 方向 | 今日卖出情况 | 近7日变化 | 推荐理由 | 参考大V | 置信度 |
-
-注意：
-- 如果只有卖出份额，没有卖出金额：不要计算卖出金额，使用卖出人数/卖出操作数/连续卖出天数
-- 不能把不同基金的卖出份额直接相加作为资金强度
-- "卖出推荐"表示：从大V行为角度出现较明显的减仓/卖出信号
-- 不要输出：必须卖出、立即清仓、一定下跌
-- 转换转出（conversion_out）不与主动卖出等权处理；推荐理由必须区分
-
-十三、风险提示规则
-### 七、风险提示
-风险提示只允许基于：真实交易、历史统计、输入观点。不要自行补充未经输入的数据。
-例如：
-- 可以说："大头哥哥认为硬科技短期仍可能调整"（因为原文有这个观点）
-- 但不能因为有人卖出就自动写："止盈卖出"（除非原文明确写了止盈）
-- 卖出原因未知时只写：卖出、减仓行为、转出
-
-十四、完整输出结构
-### 一、今日总体判断：[一句话概括市场特征，行情描述需标注来源]
-（开头需注明：今日共采集 X 位大V、Y 条操作记录，具体数字从「今日采集概况」引用）
+九、输出结构（严格按此顺序与标题）
+### 一、今日总体判断
+（开头注明：今日共采集 X 位大V、Y 条操作记录，具体数字从「今日采集概况」引用。行情描述必须标注来源，如"从采集到的大V观点看……"。）
 ### 二、方向汇总
-| 方向 | 今日人数 | 今日金额 | 7日人数变化 | 7日金额变化 | 判断 |
-[表格：从输入的方向结构化数据原样引用，不得重算，按今日人数从高到低排序]
-注意：「其他/待分类」方向需在判断列说明包含哪些基金。
+（从输入 directions 引用，按今日人数从高到低排序；direction 必须在 allowed_directions 内。）
 ### 三、近7日趋势变化
-[表格，示例：]
-| 大V/方向 | 今日(该方向) | 该方向近7日基准 | 变化 | 趋势判断 |
-| :--- | ---: | ---: | ---: | :--- |
-| 大头哥哥·半导体 | 5万 | 日均10万 | -50% | 持续买入但明显降温 |
-| 光模块之王·CPO | 8万 | 日均3万 | +167% | 加仓显著增强 |
-注意：本表的「今日/近7日基准」是「大V×方向」口径（kols[].directions[].direction_today_buy_amount / direction_avg_daily_buy_amount），
-与「核心大V操作详解」里的大V整体口径（kols[].last_7d.avg_daily_buy_amount）是不同层级，数值通常不同，必须在表头或说明中标注「该方向」，不得混用。
+（大V×方向口径；direction 必须在 allowed_directions 内。）
 ### 四、买入推荐
-[排名 | 方向 | 今日买入人数 | 今日买入金额 | 近7日变化 | 推荐理由 | 参考大V | 置信度]
+（最多 3 个；方向必须来自 buy_candidates。）
 ### 五、卖出推荐
-[排名 | 方向 | 今日卖出情况 | 近7日变化 | 推荐理由 | 参考大V | 置信度]
+（最多 3 个；方向必须来自 sell_candidates。）
 ### 六、风险提示
-[关键风险点列表]
-### 七、核心大V操作详解
-[按大V分组，逐笔列出操作+观点摘要；状态标签原样引用 Python 结果]"""
+（只基于：真实交易、历史统计、输入观点；如有 data_warning，用自然语言标注"采集可能提前终止，数据可能不完整"。）
+### 七、待确认基金
+（如有 unmapped_funds，列出大V+基金名+操作类型，并明确"这些交易保留在原始记录中，不参与方向汇总与推荐"。如无 unmapped_funds，本节写"无"。）
+### 八、核心大V操作详解
+（按大V分组，逐笔列出操作+观点摘要。所有 direction 必须原样引用输入表格里的值。）
+"""
 
 
 # ============================================================
@@ -247,6 +100,7 @@ _REPORT_COLUMNS = [
     ("操作类型", "operation_type"),
     ("操作状态", "operation_status"),
     ("基金名称", "fund_name"),
+    ("方向", "direction"),
     ("买入金额(元)", "buy_amount"),
     ("卖出份额(份)", "sell_shares"),
     ("转换前基金名称", "convert_from_fund"),
@@ -329,17 +183,46 @@ def generate_daily_report(
 
     parts = [
         "以下数据已由前置流程解析成表（每行一笔操作，字段见表头），",
-        "请据此直接输出每日复盘分析报告（按「十四、完整输出结构」）。",
+        "请据此直接输出每日复盘分析报告（按「九、输出结构」）。",
         "",
         f"## 今日采集概况",
         f"- 今日参与大V数量：**{kol_count} 位**",
         f"- 今日操作记录总数：**{len(records)} 条**",
         "",
-        "## 今日原始数据表",
+        "## 今日原始数据表（含「投资方向」列 — 每笔交易的最终方向已固化）",
         table,
         "",
         "## 每笔交易的方向归属（Source of Truth）",
         *per_record_lines,
+    ]
+
+    # allowed_directions + unmapped_funds —— LLM 方向汇总的唯一白名单 + 待确认基金清单
+    allowed_directions: List[str] = []
+    unmapped_funds: List[Dict[str, Any]] = []
+    for r in records:
+        d = getattr(r, "direction", None) or "待确认"
+        if d in ("待确认", "其他/待分类"):
+            unmapped_funds.append({
+                "kol": r.kol_name or "-",
+                "fund": r.fund_name or "-",
+                "operation": r.operation_type or "-",
+            })
+        elif d not in allowed_directions:
+            allowed_directions.append(d)
+
+    parts += [
+        "",
+        "## allowed_directions（方向汇总/趋势/推荐中允许出现的 direction 白名单）",
+        "```json",
+        json.dumps(sorted(allowed_directions), ensure_ascii=False, indent=2),
+        "```",
+        "以上列表来自 fund_direction_master 主库，是本次报告允许出现的全部 direction。",
+        "**严禁**新增、删除、合并、拆分方向；**严禁**使用列表之外的方向名（包括但不限于「其他/待分类」「待确认」）。",
+        "",
+        "## unmapped_funds（未命中主库的基金 — 仅在「待确认基金」节展示，不参与方向汇总）",
+        "```json",
+        json.dumps(unmapped_funds, ensure_ascii=False, indent=2),
+        "```",
     ]
 
     # 把推荐候选也单独传给 LLM（强制它只能从中选）
@@ -406,7 +289,106 @@ def generate_daily_report(
         logger.error("每日分析报告生成失败: %s", result["error"])
         return None
 
-    return result["content"]
+    return _sanitize_report(result["content"], allowed_directions, unmapped_funds)
+
+
+# ============================================================
+#  后置过滤：剔除 LLM 仍写出的禁用内容（确定性检查）
+# ============================================================
+
+# 报告正文（面向用户）禁止出现的关键字
+_FORBIDDEN_KEYWORDS = [
+    "数据完整性",
+    "采集完整",
+    "采集正常到底",
+    "数据完整",
+    "crawl_status",
+    "stop_type",
+    "bottom_detected",
+    "expand_remaining",
+    # 「其他/待分类」作方向名时禁止出现
+    "其他/待分类",
+]
+
+
+def _sanitize_report(text: str, allowed_directions: List[str], unmapped_funds: List[Dict[str, Any]]) -> str:
+    """对 LLM 生成的报告做后置过滤：
+
+    1. 删除包含禁用关键字（数据完整性/采集完整/crawl_status 等）的整段；
+    2. 删除包含「其他/待分类」作为方向行的整段（用作方向名时）；
+    3. 兜底：若仍残留禁用字符串，整段直接删除；
+    4. 校验 allowed_directions 白名单：方向汇总/趋势表中出现非白名单方向的整段删除。
+    """
+    if not text:
+        return text
+
+    lines = text.split("\n")
+    out: List[str] = []
+    in_forbidden_block = False
+    block_buf: List[str] = []
+    allowed_set = set(allowed_directions or [])
+
+    def _flush_block(buf: List[str]) -> None:
+        """决定是否保留 buf 块；保留则加入 out。"""
+        if not buf:
+            return
+        joined = "\n".join(buf)
+        # 1) 含禁用关键字 → 删除
+        if any(kw in joined for kw in _FORBIDDEN_KEYWORDS):
+            logger.warning("[sanitize] 删除含禁用关键字段落: %s", joined[:80].replace("\n", " "))
+            return
+        # 2) 方向行白名单校验（仅识别「### 二、方向汇总」后的方向单元格）
+        # 简易规则：若 buf 内出现以 | 包裹的、且不是 allowed_set 中的方向名，整段删
+        cleaned_buf: List[str] = []
+        for ln in buf:
+            if "|" in ln and ln.lstrip().startswith("|"):
+                # 拆出第二列（方向列）
+                parts = [p.strip() for p in ln.strip().strip("|").split("|")]
+                if len(parts) >= 1:
+                    dir_name = parts[0]
+                    if dir_name and dir_name not in allowed_set and dir_name not in (
+                        "方向", "大V/方向", "排名", "—", "", "合计",
+                    ):
+                        logger.warning(
+                            "[sanitize] 删除非白名单方向行: %s",
+                            dir_name,
+                        )
+                        continue
+                cleaned_buf.append(ln)
+            else:
+                cleaned_buf.append(ln)
+        out.extend(cleaned_buf)
+
+    for line in lines:
+        if line.startswith("### ") or line.startswith("---"):
+            # 段落分隔：flush 上一段
+            if block_buf:
+                _flush_block(block_buf)
+                block_buf = []
+            in_forbidden_block = False
+            out.append(line)
+            continue
+        # 段落级禁用标记：「> 数据完整性」等 blockquote 标记
+        if line.lstrip().startswith(">") and any(kw in line for kw in _FORBIDDEN_KEYWORDS):
+            in_forbidden_block = True
+            continue
+        if in_forbidden_block:
+            # 跳过直到下一个段落分隔
+            continue
+        block_buf.append(line)
+
+    _flush_block(block_buf)
+
+    cleaned = "\n".join(out)
+
+    # 兜底：最后再做一次"禁用关键字整行删除"
+    final_lines = []
+    for ln in cleaned.split("\n"):
+        if any(kw in ln for kw in _FORBIDDEN_KEYWORDS):
+            logger.warning("[sanitize-final] 删除残留禁用行: %s", ln[:80])
+            continue
+        final_lines.append(ln)
+    return "\n".join(final_lines)
 
 
 def _resolve_output_dir() -> str:

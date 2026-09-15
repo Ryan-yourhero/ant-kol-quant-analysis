@@ -31,6 +31,10 @@ class TradeRecord(BaseModel):
     )
     operation_status: Optional[str] = Field(None, description="操作状态，如 确认中")
     fund_name: Optional[str] = Field(None, description="基金名称")
+    # ---- 最终投资方向（来源：fund_direction_master，由 report_service 注入） ----
+    direction: Optional[str] = Field(None, description="最终投资方向；未命中主库时为「待确认」")
+    direction_source: Optional[str] = Field(None, description="manual/rule/web_search/db/unmapped")
+    direction_verified: Optional[bool] = Field(None, description="fund_direction_master.verified 标记")
     buy_amount: Optional[str] = Field(None, description="买入金额（元）")
     sell_shares: Optional[str] = Field(None, description="卖出份额（份）")
     convert_from_fund: Optional[str] = Field(None, description="转换前基金名称")

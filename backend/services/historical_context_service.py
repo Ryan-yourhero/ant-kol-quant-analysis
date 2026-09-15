@@ -43,9 +43,33 @@ from src.parser.direction_classifier import (  # noqa: E402
     classify_records,
     is_other_direction,
     OTHER_DIRECTION,
+    ClassificationResult,
 )
 from src.parser.models import TradeRecord  # noqa: E402
 from .direction_resolver import resolve_records  # noqa: E402
+
+
+def _build_classifications_from_records(records: List[TradeRecord]) -> List[ClassificationResult]:
+    """根据 record.direction / direction_source / direction_verified 直接构造 ClassificationResult。
+
+    - 不调用任何 web_search / llm / keyword 分类
+    - 未注入 direction 的 record → direction=待确认 / source=unmapped
+    - direction 为 "待确认" / "其他/待分类" 的：source 标 unmapped，但 confidence 仍带 verified 标记
+    """
+    out: List[ClassificationResult] = []
+    for r in records:
+        direction = getattr(r, "direction", None) or "待确认"
+        source = getattr(r, "direction_source", None) or "unmapped"
+        verified = bool(getattr(r, "direction_verified", False))
+        confidence = "high" if verified else "low"
+        evidence = f"DB 主库: {direction}" if source != "unmapped" else "未命中主库"
+        out.append(ClassificationResult(
+            direction=direction,
+            confidence=confidence,
+            source=source,
+            evidence=evidence,
+        ))
+    return out
 
 logger = logging.getLogger("backend.historical_context_service")
 
@@ -147,7 +171,11 @@ def _valid_history_runs(session, analysis_date: date) -> List[Tuple[int, date]]:
 # ============================================================
 
 def _load_history_records(session, run_ids: List[int]) -> List[Dict]:
-    """从 MySQL 加载历史 Operation，重建为类似 TradeRecord 的 dict（不带 direction 字段）。"""
+    """从 MySQL 加载历史 Operation，重建为类似 TradeRecord 的 dict。
+
+    direction 字段直接从 Operation 关联的 FundDirectionMaster 读取——
+    不依赖 resolve_records / rule / web_search。
+    """
     from src.storage.models import Operation
 
     ops = (
@@ -160,6 +188,10 @@ def _load_history_records(session, run_ids: List[int]) -> List[Dict]:
         kol_name = o.kol.name if o.kol else None
         if not kol_name:
             continue
+        fd = o.fund_direction
+        direction = fd.direction if fd else None
+        direction_source = fd.classification_source if fd else "unmapped"
+        direction_verified = bool(fd.verified) if fd else False
         out.append({
             "kol_name": kol_name,
             "collect_date": o.collect_date,
@@ -169,8 +201,11 @@ def _load_history_records(session, run_ids: List[int]) -> List[Dict]:
             "opinion_text": o.post.opinion_text if o.post else None,
             "buy_amount": o.buy_amount,
             "sell_shares": o.sell_shares,
-            "convert_from_fund": None,  # Operation 表未保存
+            "convert_from_fund": None,
             "convert_to_fund": None,
+            "direction": direction,
+            "direction_source": direction_source,
+            "direction_verified": direction_verified,
         })
     return out
 
@@ -212,7 +247,11 @@ def _aggregate_history(
         d = rec["collect_date"]
         if d not in date_set:
             continue
-        direction = cls.direction
+        # 优先用 record 自带的 direction（来自 DB 关联），其次回退 classifications
+        direction = rec.get("direction") or cls.direction
+        # 「待确认」/「其他/待分类」不参与方向维度聚合
+        if not direction or direction in ("待确认", "其他/待分类"):
+            continue
         op_type = rec.get("operation_type")
         remark = rec.get("remark")
         fund_name = rec.get("fund_name") or ""
@@ -299,12 +338,16 @@ def _aggregate_today(
         kol = (r.kol_name or "").strip()
         if not kol:
             continue
-        direction = cls.direction
+        # 优先使用 record 自身已注入的 final direction（来自 fund_direction_master），
+        # 只有当 record 没注入时才回退到 classifications
+        direction = getattr(r, "direction", None) or cls.direction
         op_type = r.operation_type
         remark = r.remark
 
         kol_today[kol]["op_count"] += 1
-        kol_today[kol]["directions"].add(direction)
+        # 「待确认」/「其他/待分类」不应参与方向汇总的"实际方向"集合
+        if direction not in ("待确认", "其他/待分类") and direction:
+            kol_today[kol]["directions"].add(direction)
 
         amt = _to_float(r.buy_amount) or 0.0
         shares = _to_float(r.sell_shares)
@@ -313,8 +356,8 @@ def _aggregate_today(
             "kol": kol,
             "fund": r.fund_name,
             "direction": direction,
-            "source": cls.source,
-            "confidence": cls.confidence,
+            "source": getattr(r, "direction_source", None) or cls.source,
+            "confidence": getattr(r, "direction_verified", None) and "high" or cls.confidence,
             "evidence": cls.evidence,
             "operation_type": op_type,
             "remark": remark,
@@ -632,13 +675,16 @@ def build(
     ad = _parse_date(analysis_date)
 
     # ---- 1. 固化今日 direction（Source of Truth）----
-    # 优先使用 direction_resolver：DB 命中 + 联网补全自动落库
-    try:
-        today_classifications = resolve_records(today_records)
-    except Exception as e:  # noqa: BLE001
-        # 兜底：DB 未配置/异常时用本地 v3 分类器
-        logger.warning("direction_resolver 失败，降级到本地分类器: %s", e)
-        today_classifications = classify_records(today_records)
+    # 优先使用 record.direction（由 report_service.inject_final_directions 从 fund_direction_master 注入）；
+    # 若 record 未注入（legacy 调用方），则回退到 direction_resolver。
+    # 报告路径下 record.direction 必定已存在，因此不会再触发 rule / context / web_search。
+    today_classifications = _build_classifications_from_records(today_records)
+    if any(c.source in ("unknown", "rule", "llm", "web_search") for c in today_classifications):
+        # 仅在出现非 DB 来源时才尝试联网补全（保留人工分类兜底）
+        try:
+            today_classifications = resolve_records(today_records)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("direction_resolver 失败: %s", e)
 
     # ---- 2. 今日聚合（同源）----
     kol_today, direction_today, _, per_record = _aggregate_today(today_records, today_classifications)
@@ -825,14 +871,19 @@ def build(
                 "today_vs_7d_avg_buy_pct": cmp_avg,
                 "today_vs_7d_median_buy_pct": cmp_median,
             },
-            "directions": directions_out,
+            "directions": [d for d in directions_out if not is_other_direction(d.get("direction", ""))],
         })
 
     result["kols"] = kols_out
 
     # ---- 7. 方向维度 ----
+    # 过滤「其他/待分类」与「待确认」：这些方向不出现在报告的方向汇总/候选中
+    all_dirs_raw = set(direction_today.keys()) | set(direction_daily.keys())
+    all_dirs = {
+        d for d in all_dirs_raw
+        if d and d not in ("待确认", "其他/待分类") and not is_other_direction(d)
+    }
     directions_out = []
-    all_dirs = set(direction_today.keys()) | set(direction_daily.keys())
     for direction in sorted(all_dirs):
         dt = direction_today.get(direction, {})
         today_kol_count = len(dt.get("kols", set()))
