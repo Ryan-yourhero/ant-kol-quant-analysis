@@ -15,7 +15,7 @@ if not _root.handlers:
     _h.setFormatter(logging.Formatter("%(asctime)s | %(levelname)-7s | %(name)s | %(message)s", datefmt="%H:%M:%S"))
     _root.addHandler(_h)
 
-app = FastAPI(title="基金大V AI量化分析系统")
+app = FastAPI(title="大V基金交易量化AI分析系统")
 
 app.add_middleware(
     CORSMiddleware,
