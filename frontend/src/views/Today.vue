@@ -7,19 +7,15 @@
           {{ isRunning ? '任务进行中...' : '开始今日采集' }}
         </button>
         <span v-if="status.status !== 'idle'" class="status-tag" :class="statusClass">{{ statusText }}</span>
-        <span v-if="status.message" style="color: #909399; font-size: 13px;">{{ status.message }}</span>
+        <span v-if="status.status !== 'success' && status.status !== 'failed' && status.message" style="color: #909399; font-size: 13px;">{{ status.message }}</span>
         <span v-if="status.error" style="color: #f56c6c; font-size: 13px;">{{ status.error }}</span>
       </div>
       <div v-if="status.status === 'crawling'" style="color: #409eff; font-size: 13px; margin-top: 4px;">
         正在采集第 <b>{{ currentPage }}</b> 页的数据…
       </div>
-      <div v-if="status.status === 'success' || status.status === 'failed'"
-           :style="status.status === 'failed' ? 'color: #f56c6c;' : 'color: #52c41a;'"
-           style="font-size: 13px; margin-top: 4px;">
-        <span v-if="status.status === 'success'">采集完成</span>
-        <span v-else>采集失败</span>
-        <span v-if="status.message"> · {{ status.message }}</span>
-        <span v-if="status.error"> · {{ status.error }}</span>
+      <div v-if="status.status === 'failed' && status.error"
+           style="color: #f56c6c; font-size: 13px; margin-top: 4px;">
+        {{ status.error }}
       </div>
     </div>
 
