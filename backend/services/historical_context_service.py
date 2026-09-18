@@ -71,6 +71,28 @@ def _build_classifications_from_records(records: List[TradeRecord]) -> List[Clas
         ))
     return out
 
+
+def _build_classifications_from_history(history_records: List[Dict]) -> List[ClassificationResult]:
+    """从 history_records（dict 格式）中读取 direction 字段构造 ClassificationResult。
+
+    history_records 由 _load_history_records 从 Operation 关联 FundDirectionMaster 读出
+    direction / direction_source / direction_verified。无方向时归「待确认」。
+    """
+    out: List[ClassificationResult] = []
+    for rec in history_records:
+        direction = rec.get("direction") or "待确认"
+        source = rec.get("direction_source") or "unmapped"
+        verified = bool(rec.get("direction_verified"))
+        confidence = "high" if verified else "low"
+        evidence = f"DB 主库: {direction}" if source != "unmapped" else "未命中主库"
+        out.append(ClassificationResult(
+            direction=direction,
+            confidence=confidence,
+            source=source,
+            evidence=evidence,
+        ))
+    return out
+
 logger = logging.getLogger("backend.historical_context_service")
 
 WINDOW_DAYS = HISTORICAL_THRESHOLDS["window_days"]
@@ -173,22 +195,64 @@ def _valid_history_runs(session, analysis_date: date) -> List[Tuple[int, date]]:
 def _load_history_records(session, run_ids: List[int]) -> List[Dict]:
     """从 MySQL 加载历史 Operation，重建为类似 TradeRecord 的 dict。
 
-    direction 字段直接从 Operation 关联的 FundDirectionMaster 读取——
-    不依赖 resolve_records / rule / web_search。
+    direction 字段实时查 fund_direction_master（按 fund_code → normalized_name 匹配），
+    不依赖 Operation.fund_direction_id 关联（爬虫落库时该字段未填，回填不彻底）。
     """
     from src.storage.models import Operation
+    from backend.services import fund_direction_repo as repo
 
     ops = (
         session.query(Operation)
         .filter(Operation.crawl_run_id.in_(run_ids))
         .all()
     )
+
+    # 批量查 fund_direction_master：先按 fund_code，再按 normalized_name
+    norm_map: Dict[str, Any] = {}
+    code_map: Dict[str, Any] = {}
+    fund_codes = {o.fund_code for o in ops if o.fund_code}
+    if fund_codes:
+        from src.storage.models import FundDirectionMaster
+        rows = (
+            session.query(FundDirectionMaster)
+            .filter(FundDirectionMaster.fund_code.in_(list(fund_codes)))
+            .all()
+        )
+        for r in rows:
+            if r.fund_code:
+                code_map[r.fund_code] = r
+
+    norms = set()
+    for o in ops:
+        if o.fund_name:
+            n = repo.normalize_fund_name(o.fund_name)
+            if n:
+                norms.add(n)
+    if norms:
+        from src.storage.models import FundDirectionMaster
+        rows = (
+            session.query(FundDirectionMaster)
+            .filter(FundDirectionMaster.normalized_name.in_(list(norms)))
+            .all()
+        )
+        for r in rows:
+            norm_map[r.normalized_name] = r
+
     out = []
     for o in ops:
         kol_name = o.kol.name if o.kol else None
         if not kol_name:
             continue
-        fd = o.fund_direction
+        # 优先 fund_code → normalized_name → fallback Operation.fund_direction
+        fd = None
+        if o.fund_code and o.fund_code in code_map:
+            fd = code_map[o.fund_code]
+        elif o.fund_name:
+            n = repo.normalize_fund_name(o.fund_name)
+            if n and n in norm_map:
+                fd = norm_map[n]
+        if fd is None and o.fund_direction:
+            fd = o.fund_direction  # 兜底
         direction = fd.direction if fd else None
         direction_source = fd.classification_source if fd else "unmapped"
         direction_verified = bool(fd.verified) if fd else False
@@ -198,6 +262,7 @@ def _load_history_records(session, run_ids: List[int]) -> List[Dict]:
             "operation_type": o.operation_type,
             "remark": o.remark,
             "fund_name": o.fund_name,
+            "fund_code": o.fund_code,
             "opinion_text": o.post.opinion_text if o.post else None,
             "buy_amount": o.buy_amount,
             "sell_shares": o.sell_shares,
@@ -742,9 +807,10 @@ def build(
         session.close()
 
     # ---- 5. 历史 direction 一次性固化 ----
-    # history_records 是 dict 格式（不是 TradeRecord），复用 v3 本地分类器；
-    # DB 命中由下次跑报告时自动补齐。
-    history_classifications = classify_records(history_records)
+    # 直接从 history_records 中读取 direction（由 _load_history_records 从
+    # Operation.fund_direction 关联读出），不再调用 classify_records /
+    # rule / context / web_search。
+    history_classifications = _build_classifications_from_history(history_records)
 
     (
         kol_daily_buy,
