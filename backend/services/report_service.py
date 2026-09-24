@@ -31,26 +31,52 @@ logger = logging.getLogger("backend.report_service")
 
 OUTPUT_DIR = os.path.join(BASE_DIR, "output")
 
-# ---- 线程安全状态 ----
+# ---- 线程安全状态（持久化到磁盘） ----
 _lock = threading.Lock()
-_state = {
-    "status": "idle",  # idle / generating / success / failed
-    "message": "",
-    "total": 0,
-    "done": 0,
-    "current_date": None,
-    "failed_dates": [],
-    "started_at": None,
-    "finished_at": None,
-    # per-date 实时状态：{ "20260924": "generating" / "success" / "failed" }
-    "date_status": {},
-}
+_STATE_FILE = os.path.join(OUTPUT_DIR, "_report_state.json")
+
+
+def _load_state() -> dict:
+    """从磁盘读取持久化的状态，启动后立即恢复。"""
+    if os.path.exists(_STATE_FILE):
+        try:
+            import json as _json
+            with open(_STATE_FILE, "r", encoding="utf-8") as f:
+                return _json.load(f)
+        except Exception:
+            pass
+    return {
+        "status": "idle",
+        "message": "",
+        "total": 0,
+        "done": 0,
+        "current_date": None,
+        "failed_dates": [],
+        "started_at": None,
+        "finished_at": None,
+        "date_status": {},  # per-date 实时状态：{ "20260924": "generating" / "success" / "failed" }
+    }
+
+
+_state = _load_state()
+
+
+def _save_state() -> None:
+    """持久化状态。"""
+    try:
+        import json as _json
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        with open(_STATE_FILE, "w", encoding="utf-8") as f:
+            _json.dump(_state, f, ensure_ascii=False)
+    except Exception as e:
+        logger.warning("保存报告状态失败: %s", e)
 
 
 def _mark_date_status(date_str: str, status: str) -> None:
     """更新单日期状态。status: generating / success / failed"""
     with _lock:
         _state["date_status"][date_str] = status
+        _save_state()
 
 
 def _date_status_for(date_str: str) -> str:
@@ -59,7 +85,6 @@ def _date_status_for(date_str: str) -> str:
         s = _state["date_status"].get(date_str)
         if s:
             return s
-    # 文件存在则默认成功；否则未生成
     if os.path.exists(_report_path(date_str)):
         return "success"
     return "not_started"
@@ -433,10 +458,12 @@ def _run(dates: List[str]):
             started_at=now,
             finished_at=None,
         )
+        _save_state()
 
     for d in dates:
         with _lock:
             _state["current_date"] = d
+            _save_state()
         _mark_date_status(d, "generating")
         logger.info("[REPORT] 开始生成 %s", d)
         try:
@@ -452,16 +479,21 @@ def _run(dates: List[str]):
                 _state["failed_dates"].append({"date": d, "error": info})
                 _mark_date_status(d, "failed")
             _state["current_date"] = None
+            _save_state()
 
     with _lock:
         failed = len(_state["failed_dates"])
         _state["status"] = "success" if failed == 0 else "failed"
         _state["message"] = f"完成 {_state['done']}/{_state['total']}，失败 {failed}"
         _state["finished_at"] = datetime.now().isoformat()
+        _save_state()
 
 
 def generate_reports_async(dates: Optional[List[str]] = None) -> dict:
-    """启动后台批量生成。dates=None 表示全部有数据的日期。"""
+    """启动后台批量生成。dates=None 表示全部有数据的日期。
+
+    后台线程异常会被捕获并写入状态文件，**绝不**让 uvicorn worker 崩溃。
+    """
     with _lock:
         if _state["status"] == "generating":
             return {"ok": False, "message": "正在生成中，请稍候"}
@@ -474,6 +506,17 @@ def generate_reports_async(dates: Optional[List[str]] = None) -> dict:
     if not target:
         return {"ok": False, "message": "没有可生成的日期"}
 
-    thread = threading.Thread(target=_run, args=(target,), daemon=True)
+    def _safe_run():
+        try:
+            _run(target)
+        except Exception as e:
+            logger.exception("[REPORT] 后台线程崩溃: %s", e)
+            with _lock:
+                _state["status"] = "failed"
+                _state["message"] = f"后台线程异常: {e}"
+                _state["finished_at"] = datetime.now().isoformat()
+                _save_state()
+
+    thread = threading.Thread(target=_safe_run, daemon=True)
     thread.start()
     return {"ok": True, "message": f"已启动 {len(target)} 个日期的报告生成"}
