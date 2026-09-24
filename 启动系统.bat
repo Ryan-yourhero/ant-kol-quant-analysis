@@ -1,26 +1,21 @@
 @echo off
 rem ============================================================
 rem   DaV Fund Quant AI Analysis - Quick Start
-rem   (Chinese display requires cmd.exe to support UTF-8)
-rem
-rem   Guards:
-rem   1. Verify .project_marker to refuse start in wrong folder
-rem   2. Check port holder's CommandLine, must include PROJECT_ROOT
+rem   1. Verify .project_marker
+rem   2. Verify port holder is from this project (via PowerShell Get-CimInstance)
 rem   3. Skip if port already used by this project; abort if by other
-rem   4. Backend / frontend started with explicit window titles
 rem ============================================================
 
 cd /d "%~dp0"
-chcp 65001 >nul 2>&1
 setlocal EnableDelayedExpansion
 
 echo === DaV Fund Quant AI Analysis ===
-echo %~dp0
+echo Path: %~dp0
 echo ====================================
 
 set "PROJECT_ROOT=%~dp0"
 if not exist "%PROJECT_ROOT%\.project_marker" (
-    echo [ERROR] .project_marker missing. Run this script from KOL-RICH root.
+    echo [ERROR] .project_marker missing. Run from KOL-RICH root.
     echo         Current: %PROJECT_ROOT%
     pause
     exit /b 1
@@ -36,22 +31,26 @@ if errorlevel 1 (
     echo [OK] MySQL80 running
 )
 
+rem ---- Helper: get CommandLine for a PID via PowerShell ----
+rem   Returns the CommandLine text in %1 (or empty if not found / error)
+set "GET_CMDLINE_POWERSHELL=powershell -NoProfile -ExecutionPolicy Bypass -Command \"(Get-CimInstance Win32_Process -Filter 'ProcessId=%1' -ErrorAction SilentlyContinue ^| Select-Object -First 1 -ExpandProperty CommandLine)\""
+
 rem ---- 2. Backend :8000 ----
 echo [STEP 2] Checking backend :8000 ...
 set "BACKEND_OK=0"
 set "PID_8000="
 for /f "tokens=5" %%P in ('netstat -ano ^| findstr ":8000" ^| findstr "LISTENING"') do (
     set "PID_8000=%%P"
-    set "CMDLINE="
-    for /f "tokens=*" %%I in ('wmic process where "ProcessId=%%P" get CommandLine /format:list 2^>nul ^| findstr /i "CommandLine="') do (
-        set "CMDLINE=%%I"
+    for /f "delims=" %%C in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "try { (Get-CimInstance Win32_Process -Filter 'ProcessId=%%P' -ErrorAction SilentlyContinue ^| Select-Object -First 1 -ExpandProperty CommandLine) } catch { '' }"') do (
+        set "CMDLINE=%%C"
     )
+    echo DEBUG_LINE: %CMDLINE%
     call set "CMDLINE_PATH=%%CMDLINE:*%PROJECT_ROOT%=KOL%%"
     if /i "!CMDLINE_PATH!"=="KOL" (
         set "BACKEND_OK=1"
-        echo [OK] :8000 already used by this project (PID %%P)
+        echo [OK] :8000 used by this project ^(PID %%P^)
     ) else (
-        echo [WARN] :8000 used by other process (PID %%P): !CMDLINE!
+        echo [WARN] :8000 used by other ^(PID %%P^): !CMDLINE!
     )
 )
 
@@ -72,16 +71,15 @@ set "FRONTEND_OK=0"
 set "PID_5173="
 for /f "tokens=5" %%P in ('netstat -ano ^| findstr ":5173" ^| findstr "LISTENING"') do (
     set "PID_5173=%%P"
-    set "CMDLINE="
-    for /f "tokens=*" %%I in ('wmic process where "ProcessId=%%P" get CommandLine /format:list 2^>nul ^| findstr /i "CommandLine="') do (
-        set "CMDLINE=%%I"
+    for /f "delims=" %%C in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "try { (Get-CimInstance Win32_Process -Filter 'ProcessId=%%P' -ErrorAction SilentlyContinue ^| Select-Object -First 1 -ExpandProperty CommandLine) } catch { '' }"') do (
+        set "CMDLINE=%%C"
     )
     call set "CMDLINE_PATH=%%CMDLINE:*%PROJECT_ROOT%=KOL%%"
     if /i "!CMDLINE_PATH!"=="KOL" (
         set "FRONTEND_OK=1"
-        echo [OK] :5173 already used by this project (PID %%P)
+        echo [OK] :5173 used by this project ^(PID %%P^)
     ) else (
-        echo [WARN] :5173 used by other process (PID %%P): !CMDLINE!
+        echo [WARN] :5173 used by other ^(PID %%P^): !CMDLINE!
     )
 )
 
