@@ -1,0 +1,11 @@
+# Force CRLF for Windows batch scripts (cmd.exe requires CRLF line endings)
+*.bat        text eol=crlf
+*.cmd        text eol=crlf
+# Python files: LF is fine
+*.py         text eol=lf
+*.vue        text eol=lf
+*.js         text eol=lf
+*.ts         text eol=lf
+*.md         text eol=lf
+# Templates / metadata
+启动系统.bat  text eol=crlf

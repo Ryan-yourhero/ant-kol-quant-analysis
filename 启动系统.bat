@@ -1,46 +1,45 @@
 @echo off
-setlocal EnableDelayedExpansion
-
 rem ============================================================
-rem   大V基金交易量化AI分析系统 启动脚本
+rem   DaV Fund Quant AI Analysis - Quick Start
+rem   (Chinese display requires cmd.exe to support UTF-8)
 rem
-rem   防呆设计：
-rem   1. 校验 .project_marker：缺失即拒绝启动（避免误启动别的项目）
-rem   2. 端口检测时核对占用进程的 ImagePath，必须包含本目录
-rem   3. 进程已运行（端口被本项目占用）→ 跳过；端口被别的项目占用 → 报错并提示
-rem   4. 后端前端启动时显式设置窗口标题
+rem   Guards:
+rem   1. Verify .project_marker to refuse start in wrong folder
+rem   2. Check port holder's CommandLine, must include PROJECT_ROOT
+rem   3. Skip if port already used by this project; abort if by other
+rem   4. Backend / frontend started with explicit window titles
 rem ============================================================
 
 cd /d "%~dp0"
+chcp 65001 >nul 2>&1
+setlocal EnableDelayedExpansion
 
-echo ============================================
-echo   大V基金交易量化AI分析系统
-echo   %~dp0
-echo ============================================
+echo === DaV Fund Quant AI Analysis ===
+echo %~dp0
+echo ====================================
 
-rem ---- 0. 项目根目录校验 ----
 set "PROJECT_ROOT=%~dp0"
 if not exist "%PROJECT_ROOT%\.project_marker" (
-    echo [ERROR] 未检测到 .project_marker 文件，当前目录不是「%PROJECT_NAME%」项目根目录。
-    echo         请在 E:\PM\PM\KOL-RICH\ 下运行 启动系统.bat
-    echo         当前路径：%PROJECT_ROOT%
+    echo [ERROR] .project_marker missing. Run this script from KOL-RICH root.
+    echo         Current: %PROJECT_ROOT%
     pause
     exit /b 1
 )
 
 rem ---- 1. MySQL80 ----
-echo [STEP 1] 检查 MySQL80 ...
+echo [STEP 1] Checking MySQL80 ...
 sc query MySQL80 | findstr /i "RUNNING" >nul
 if errorlevel 1 (
-    echo [INFO] 启动 MySQL80 ...
+    echo [INFO] Starting MySQL80 ...
     net start MySQL80
 ) else (
-    echo [OK]   MySQL80 已在运行
+    echo [OK] MySQL80 running
 )
 
 rem ---- 2. Backend :8000 ----
-echo [STEP 2] 检查后端 :8000 ...
+echo [STEP 2] Checking backend :8000 ...
 set "BACKEND_OK=0"
+set "PID_8000="
 for /f "tokens=5" %%P in ('netstat -ano ^| findstr ":8000" ^| findstr "LISTENING"') do (
     set "PID_8000=%%P"
     set "CMDLINE="
@@ -50,26 +49,25 @@ for /f "tokens=5" %%P in ('netstat -ano ^| findstr ":8000" ^| findstr "LISTENING
     call set "CMDLINE_PATH=%%CMDLINE:*%PROJECT_ROOT%=KOL%%"
     if /i "!CMDLINE_PATH!"=="KOL" (
         set "BACKEND_OK=1"
-        echo [OK]   :8000 已被本项目占用（PID %%P）
+        echo [OK] :8000 already used by this project (PID %%P)
     ) else (
-        echo [WARN] :8000 被其它进程占用（PID %%P）。命令：%CMDLINE%
+        echo [WARN] :8000 used by other process (PID %%P): !CMDLINE!
     )
 )
 
 if "%BACKEND_OK%"=="0" (
     if defined PID_8000 (
-        echo [ERROR] 端口 8000 被其它项目占用，本项目后端无法启动。
-        echo         请先停止占用 :8000 的进程（PID !PID_8000!），或修改 .project_marker 中的 backend_port。
+        echo [ERROR] Port 8000 occupied by another project. Stop PID !PID_8000! first.
         pause
         exit /b 1
     ) else (
-        echo [INFO] 启动后端 :8000 ...
-        start "KOL-RICH Backend" /min cmd /c "cd /d %PROJECT_ROOT% ^&^& python -m uvicorn backend.app:app --host 127.0.0.1 --port 8000"
+        echo [INFO] Starting backend :8000 ...
+        start "KOL-RICH Backend" /min cmd /c "cd /d %PROJECT_ROOT% && python -m uvicorn backend.app:app --host 127.0.0.1 --port 8000"
     )
 )
 
 rem ---- 3. Frontend :5173 ----
-echo [STEP 3] 检查前端 :5173 ...
+echo [STEP 3] Checking frontend :5173 ...
 set "FRONTEND_OK=0"
 set "PID_5173="
 for /f "tokens=5" %%P in ('netstat -ano ^| findstr ":5173" ^| findstr "LISTENING"') do (
@@ -81,26 +79,25 @@ for /f "tokens=5" %%P in ('netstat -ano ^| findstr ":5173" ^| findstr "LISTENING
     call set "CMDLINE_PATH=%%CMDLINE:*%PROJECT_ROOT%=KOL%%"
     if /i "!CMDLINE_PATH!"=="KOL" (
         set "FRONTEND_OK=1"
-        echo [OK]   :5173 已被本项目占用（PID %%P）
+        echo [OK] :5173 already used by this project (PID %%P)
     ) else (
-        echo [WARN] :5173 被其它进程占用（PID %%P）。命令：%CMDLINE%
+        echo [WARN] :5173 used by other process (PID %%P): !CMDLINE!
     )
 )
 
 if "%FRONTEND_OK%"=="0" (
     if defined PID_5173 (
-        echo [ERROR] 端口 5173 被其它项目占用，本项目前端无法启动。
-        echo         请先停止占用 :5173 的进程（PID !PID_5173!），或修改 .project_marker 中的 frontend_port。
+        echo [ERROR] Port 5173 occupied by another project. Stop PID !PID_5173! first.
         pause
         exit /b 1
     ) else (
-        echo [INFO] 启动前端 :5173 ...
-        start "KOL-RICH Frontend" /min cmd /c "cd /d %PROJECT_ROOT%\frontend ^&^& npm run dev"
+        echo [INFO] Starting frontend :5173 ...
+        start "KOL-RICH Frontend" /min cmd /c "cd /d %PROJECT_ROOT%\frontend && npm run dev"
     )
 )
 
 rem ---- 4. Wait for both ports ----
-echo [STEP 4] 等待端口就绪（最久 30s）...
+echo [STEP 4] Waiting for ports (up to 30s) ...
 set /a tries=0
 :wait_loop
 set /a ready=0
@@ -114,12 +111,14 @@ goto wait_loop
 :ready
 
 rem ---- 5. Open browser ----
-echo [STEP 5] 打开浏览器 ...
+echo [STEP 5] Opening browser ...
 start "" "http://localhost:5173/"
 
-echo ============================================
-echo   已启动。后台窗口标题：KOL-RICH Backend / KOL-RICH Frontend
-echo   关闭那两个最小化窗口即可停止服务。
-echo ============================================
+echo ====================================
+echo   Started. Background windows:
+echo     - KOL-RICH Backend
+echo     - KOL-RICH Frontend
+echo   Close those two windows to stop.
+echo ====================================
 echo.
 pause
