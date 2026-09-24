@@ -1,0 +1,6 @@
+# 此文件用于标识本目录为「大V基金交易量化AI分析系统」（原 KOL-RICH）。
+# 启动脚本会校验它存在；缺失时拒绝启动，防止误启动别的项目。
+project=kol-rich
+display_name=大V基金交易量化AI分析系统
+backend_port=8000
+frontend_port=5173
