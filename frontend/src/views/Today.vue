@@ -43,13 +43,17 @@
               <td>{{ r.date }}</td>
               <td>{{ r.record_count }}</td>
               <td>
-                <span v-if="r.has_report" style="color: #52c41a;">已生成</span>
+                <span v-if="r.report_status === 'generating'" style="color: #409eff;">生成中...</span>
+                <span v-else-if="r.report_status === 'failed'" style="color: #f56c6c;">生成失败</span>
+                <span v-else-if="r.has_report" style="color: #52c41a;">已生成</span>
                 <span v-else style="color: #909399;">未生成</span>
               </td>
               <td>
-                <button v-if="r.has_report" class="btn btn-default btn-sm with-gap" @click="viewReport(r)">查看AI报告</button>
+                <button v-if="r.has_report && r.report_status !== 'generating'" class="btn btn-default btn-sm with-gap" @click="viewReport(r)">查看AI报告</button>
                 <button class="btn btn-default btn-sm with-gap" @click="viewRawOps(r)">查看原始交易记录</button>
-                <button v-if="r.has_report" class="btn btn-primary btn-sm with-gap" :disabled="reportStatus.status === 'generating'" @click="generateOne(r.date)">重新生成报告</button>
+                <button class="btn btn-primary btn-sm with-gap" :disabled="reportStatus.status === 'generating'" @click="generateOne(r.date)">
+                  {{ r.report_status === 'generating' ? '生成中...' : '重新生成报告' }}
+                </button>
               </td>
             </tr>
           </tbody>
@@ -396,12 +400,20 @@ export default {
 
     function generateOne(date) {
       if (reportStatus.value.status === 'generating') return
+      // 乐观更新：立刻把这一行状态切到「生成中」
+      const idx = reports.value.findIndex(r => r.date === date)
+      if (idx >= 0) {
+        reports.value[idx] = { ...reports.value[idx], report_status: 'generating' }
+      }
       generateReports(date).then(r => {
         if (r.data.ok) {
           reportStatus.value = { status: 'generating' }
           pollReports()
         } else {
           alert(r.data.message)
+          if (idx >= 0) {
+            reports.value[idx] = { ...reports.value[idx], report_status: 'failed' }
+          }
         }
       }).catch(() => {})
     }

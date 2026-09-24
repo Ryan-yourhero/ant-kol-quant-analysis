@@ -42,7 +42,27 @@ _state = {
     "failed_dates": [],
     "started_at": None,
     "finished_at": None,
+    # per-date 实时状态：{ "20260924": "generating" / "success" / "failed" }
+    "date_status": {},
 }
+
+
+def _mark_date_status(date_str: str, status: str) -> None:
+    """更新单日期状态。status: generating / success / failed"""
+    with _lock:
+        _state["date_status"][date_str] = status
+
+
+def _date_status_for(date_str: str) -> str:
+    """查询某日期的状态：generating / success / failed / not_started"""
+    with _lock:
+        s = _state["date_status"].get(date_str)
+        if s:
+            return s
+    # 文件存在则默认成功；否则未生成
+    if os.path.exists(_report_path(date_str)):
+        return "success"
+    return "not_started"
 
 
 # ============================================================
@@ -305,18 +325,24 @@ def list_report_history() -> dict:
         jp = _report_json_path(d)
         has_report = os.path.exists(rp)
         has_structured = os.path.exists(jp)
+        # 单日期实时状态：generating / success / failed / not_started
+        date_iso = f"{d[:4]}-{d[4:6]}-{d[6:]}"
+        report_status = _date_status_for(d)
         items.append(
             {
-                "date": f"{d[:4]}-{d[4:6]}-{d[6:]}",
+                "date": date_iso,
                 "record_count": _excel_record_count(d),
                 "has_report": has_report,
                 "has_structured": has_structured,
+                "report_status": report_status,
                 "report_path": rp if has_report else None,
                 "json_path": jp if has_structured else None,
             }
         )
     with _lock:
         status = dict(_state)
+        # 把 date_status 也透出
+        status["date_status"] = dict(_state.get("date_status", {}))
     return {"items": items, "status": status}
 
 
@@ -411,6 +437,7 @@ def _run(dates: List[str]):
     for d in dates:
         with _lock:
             _state["current_date"] = d
+        _mark_date_status(d, "generating")
         logger.info("[REPORT] 开始生成 %s", d)
         try:
             ok, info = _generate_one(d)
@@ -420,8 +447,10 @@ def _run(dates: List[str]):
         with _lock:
             if ok:
                 _state["done"] += 1
+                _mark_date_status(d, "success")
             else:
                 _state["failed_dates"].append({"date": d, "error": info})
+                _mark_date_status(d, "failed")
             _state["current_date"] = None
 
     with _lock:
