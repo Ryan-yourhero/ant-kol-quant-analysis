@@ -23,3 +23,4 @@ export function getFundEvidence(id) { return api.get(`/funds/${id}/evidence`) }
 export function getReports() { return api.get('/reports') }
 export function generateReports(date) { return api.post('/reports/generate', { date: date || null }) }
 export function getReportContent(date) { return api.get(`/reports/${date}/content`) }
+export function getReportStructured(date) { return api.get(`/reports/${date}/structured`) }

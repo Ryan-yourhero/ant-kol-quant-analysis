@@ -33,3 +33,30 @@ def get_report_content(date_str: str):
     if content is None:
         return {"ok": False, "message": "报告不存在"}
     return {"ok": True, "date": date_str, "content": content}
+
+
+@router.get("/{date_str}/structured")
+def get_report_structured(date_str: str):
+    """读取某日期的结构化报告（summary_cards / tables / chart_data / appendix）。
+
+    优先返回新的结构化 JSON；如果还没有，回退到 Markdown 报告的极简结构。
+    """
+    structured = report_service.get_report_structured(date_str)
+    if structured:
+        return {"ok": True, "date": date_str, "structured": structured, "format": "structured"}
+    md = report_service.get_report_content(date_str)
+    if md is None:
+        return {"ok": False, "message": "报告不存在"}
+    return {
+        "ok": True,
+        "date": date_str,
+        "structured": {
+            "summary": md,
+            "summary_cards": [],
+            "tables": {},
+            "chart_data": {},
+            "appendix_pending_funds": [],
+            "meta": {"format": "legacy"},
+        },
+        "format": "legacy",
+    }

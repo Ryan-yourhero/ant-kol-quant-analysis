@@ -278,6 +278,11 @@ def _report_path(date_str: str) -> str:
     return os.path.join(OUTPUT_DIR, f"daily_report_{cleaned}.md")
 
 
+def _report_json_path(date_str: str) -> str:
+    cleaned = date_str.replace("-", "")
+    return os.path.join(OUTPUT_DIR, f"daily_report_{cleaned}.json")
+
+
 def _excel_record_count(date_str: str) -> int:
     import openpyxl
 
@@ -297,13 +302,17 @@ def list_report_history() -> dict:
     items = []
     for d in _dates_with_data():
         rp = _report_path(d)
+        jp = _report_json_path(d)
         has_report = os.path.exists(rp)
+        has_structured = os.path.exists(jp)
         items.append(
             {
                 "date": f"{d[:4]}-{d[4:6]}-{d[6:]}",
                 "record_count": _excel_record_count(d),
                 "has_report": has_report,
+                "has_structured": has_structured,
                 "report_path": rp if has_report else None,
+                "json_path": jp if has_structured else None,
             }
         )
     with _lock:
@@ -312,12 +321,23 @@ def list_report_history() -> dict:
 
 
 def get_report_content(date_str: str) -> Optional[str]:
-    """读取某日期的报告内容（Markdown 原文）。"""
+    """读取某日期的报告 Markdown 原文（兼容旧版）。"""
     rp = _report_path(date_str)
     if not os.path.exists(rp):
         return None
     with open(rp, "r", encoding="utf-8") as f:
         return f.read()
+
+
+def get_report_structured(date_str: str) -> Optional[dict]:
+    """读取某日期的结构化报告（summary_cards / tables / chart_data / appendix）。"""
+    import json as _json
+
+    jp = _report_json_path(date_str)
+    if not os.path.exists(jp):
+        return None
+    with open(jp, "r", encoding="utf-8") as f:
+        return _json.load(f)
 
 
 # ============================================================
