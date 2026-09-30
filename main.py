@@ -542,6 +542,14 @@ def run_scroll_manager_mode():
                             build as build_historical_context,
                         )
 
+                        # 方向注入：必须先于历史上下文构建，否则趋势/推荐计算的今日数据为空
+                        from backend.services.report_service import inject_final_directions
+                        _dir_stats = inject_final_directions(parse_result.records)
+                        print(
+                            f"   方向注入: DB命中 {_dir_stats['db_hit']} / 截断命中 {_dir_stats['prefix_hit']} "
+                            f"/ 自动补全 {_dir_stats['resolved']} / 待确认 {_dir_stats['pending']}"
+                        )
+
                         historical_context = None
                         try:
                             historical_context = build_historical_context(

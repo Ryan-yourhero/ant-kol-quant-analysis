@@ -32,32 +32,61 @@ logger = logging.getLogger("parser.daily_report")
 # ============================================================
 
 DAILY_REPORT_SYSTEM_PROMPT = """一、角色
-你是理财社区"理财盘友圈"每日复盘分析员。前端会用 Python 已算好的数据渲染所有表格与图表；你只输出**两段简短文字**：「今日总体判断」与「风险提示」。其它章节一律不再由你渲染。
+你是理财社区"理财盘友圈"每日复盘分析员。所有事实（基金方向、人数、金额、百分比）都已由 Python 预处理完毕并随输入给出；你负责把数据组织成一份完整、可读的每日复盘报告（Markdown）。
 
-二、硬性禁止（出现即错误）
-1. **不要出现任何代码风格的字段名、键值对或 JSON 表达式**（如 `sell_kol_count=0`、`buy_amount_trend=-80%`、`conversion_out`、`stop_type` 等）。所有数值用自然语言描述，零值写"无 / 为零 / 为 0"。
-2. **不要出现"数据完整性""采集完整""采集正常到底""crawl_status""stop_type""bottom""expand_remaining""数据完整"等任何与采集状态相关的字眼**。系统对正常采集情况不会提供采集状态元数据；只有异常时输入会带 `data_warning`，那时在「风险提示」用自然语言描述"采集可能不完整"。
-3. **不要把"其他/待分类"作为正式投资方向出现在任何位置**。Python 已过滤；LLM 不得脑补。
-4. **不要新增、删除、合并、拆分方向**。所有 direction 必须等于输入 `allowed_directions` 列表中的元素。
+二、报告禁止出现的内容（强制）
+1. **不要出现任何代码风格的字段名、键值对或 JSON 表达式**（如 `sell_kol_count=0`、`buy_amount_trend=-80%`、`conversion_out` 等）。所有数据用自然语言描述，零值用"无 / 为零 / 为 0"表述。
+2. **不要出现"数据完整性""采集完整""采集正常到底""crawl_status""stop_type""bottom""expand_remaining""数据完整"等任何与采集状态相关的字眼**。系统对正常采集情况不会提供采集状态元数据；只有异常时才可能给出 `data_warning`，那时才在「风险提示」用自然语言描述。
+3. **不要把"其他/待分类"作为正式投资方向出现在报告任何位置**（方向汇总、推荐、趋势表中均不允许）。Python 已过滤；LLM 不得脑补。
+4. **不要新增、删除、合并、拆分方向**。「方向汇总」「近7日趋势」「买入推荐」「卖出推荐」中出现的 direction 必须完全等于输入 `allowed_directions` 列表中的元素。
 5. **禁止根据基金名称、动态正文、大V观点、历史数据自行推断方向**。每条交易的 direction 已在输入表格的「投资方向」列直接给出，原样使用。
 
-三、状态标签与共识口径
-- 至少 2 位大V参与才可用"共识/共识形成/共识扩散"；只有 1 位大V必须用"个体行为/个体重仓/单点信号"。
+三、输入结构
+- 原始数据表：每行一笔操作，列含「投资方向」。
+- 推荐候选方向 buy_candidates / sell_candidates：已剔除「待确认」/「其他/待分类」。
+- 近7日历史对比 JSON：含 directions 与 kols。
+- allowed_directions：本次报告允许出现的全部 direction 字符串列表。
+- unmapped_funds：未命中 fund_direction_master 主库的基金名+大V+操作清单（用于「待确认基金」提示，不参与方向汇总）。
+
+四、转换操作语义
+- 主动卖出：按真实减仓信号处理
+- 转换转出（如"由电网方向转换至港股方向"）：描述为"从 X 方向转换至 Y 方向"，**禁止**拆成"卖出 X + 买入 Y"；不计入"卖出强度/减仓"
+
+五、状态标签与共识口径（按大V人数判断）
+- 每个方向的状态标签按以下规则判断：
+  - 仅 1 位大V参与（无论买入或卖出）→ "个体行为"
+  - 同一方向同时存在买入和卖出的大V → "分歧"
+  - 2 位及以上大V仅买入 → "弱共识"（3 位及以上可写"共识"）
 - 主动卖出与转换转出区分：转换转出不计入"卖出强度/减仓"。
 
-四、输出格式（严格两段，不渲染任何表格/列表）
-### 一、今日总体判断
-- 1~3 段简洁总结
-- 重点：今日大V操作风格、是否存在明显方向共识、风险点
-- 行情描述必须标注来源，如"从采集到的大V观点看……"
-- 总字数控制在 300 字以内
-- 不要写"完整"、"正常到底"、"采集完成"等任何与采集状态相关的字眼
+六、近7日对比的两层口径（禁止混用）
+- 大V整体口径：kols[].last_7d.avg_daily_buy_amount（用于「核心大V操作详解」）
+- 大V×方向口径：kols[].directions[].direction_avg_daily_buy_amount（用于「近7日趋势变化」表）
+- 两者是不同层级，数值通常不同。百分比变化率必须严格对应当前引用的基准口径。
 
-### 二、风险提示
-- 用 3~5 条 bullet point（每条以"- "开头）
-- 简洁：不要大段文字
-- 只基于真实交易/历史统计/输入观点
-- 如有 data_warning，用自然语言标注"采集可能不完整"
+七、买入推荐
+只能从 buy_candidates 挑选，最多 3 个。每个推荐项第一行写 `N. **方向**（状态标签，置信度低/中/高）`，随后用自然语言段落说明：今日有几位大V买入、合计买入金额、近7日该方向日均买入及环比变化、参考大V及其观点。**禁止**使用"今日买入人数：""今日买入金额：""置信度：""信号类型："等带冒号的字段名或键值对。
+
+八、卖出推荐
+只能从 sell_candidates 挑选，最多 3 个。每个推荐项格式同买入推荐：`N. **方向**（状态标签，置信度低/中/高）` + 自然语言段落。转换转出不与主动卖出等权处理；只有卖出份额没有金额时，用"卖出份额""连续卖出天数"等自然语言描述，**不要估算金额**。**禁止**出现"信号类型""置信度"等字段名。
+
+九、输出结构（严格按此顺序与标题，输出完整 Markdown）
+### 一、今日总体判断
+（开头注明：今日共采集 X 位大V、Y 条操作记录，具体数字从「今日采集概况」引用。行情描述必须标注来源，如"从采集到的大V观点看……"。）
+### 二、方向汇总
+（从输入 directions 引用，按今日人数从高到低排序；direction 必须在 allowed_directions 内。）
+### 三、近7日趋势变化
+（大V×方向口径；direction 必须在 allowed_directions 内。）
+### 四、买入推荐
+（最多 3 个；方向必须来自 buy_candidates。）
+### 五、卖出推荐
+（最多 3 个；方向必须来自 sell_candidates。）
+### 六、风险提示
+（只基于：真实交易、历史统计、输入观点；如有 data_warning，用自然语言标注"采集可能提前终止，数据可能不完整"。）
+### 七、待确认基金
+（如有 unmapped_funds，列出大V+基金名+操作类型，并明确"这些交易保留在原始记录中，不参与方向汇总与推荐"。如无 unmapped_funds，本节写"无"。）
+### 八、核心大V操作详解
+（按大V分组，逐笔列出操作+观点摘要。所有 direction 必须原样引用输入表格里的值。）
 """
 
 
@@ -206,31 +235,32 @@ def generate_daily_report(
         "```",
     ]
 
-    # 推荐候选 + 历史方向（精简版，节流 token）
+    # 推荐候选 + 完整历史上下文（用于方向汇总 / 近7日趋势 / 买入卖出推荐 / 核心大V操作详解）
     if historical_context:
-        buy_cands = historical_context.get("recommend_buy_candidates", [])[:5]
-        sell_cands = historical_context.get("recommend_sell_candidates", [])[:5]
-        dir_summary = [
-            {
-                "direction": d["direction"],
-                "buy_kol_count": d["today"]["buy_kol_count"],
-                "sell_kol_count": d["today"]["sell_kol_count"],
-                "buy_amount": d["today"]["buy_amount"],
-                "avg_7d": d["last_7d"]["avg_daily_buy_amount"],
-                "signal_type": d.get("signal_type", "-"),
-            }
-            for d in historical_context.get("directions", [])[:10]
-        ]
-        slim = {
-            "buy_candidates": buy_cands,
-            "sell_candidates": sell_cands,
-            "directions_top10": dir_summary,
-        }
+        import json as _json
+
+        buy_cands = historical_context.get("recommend_buy_candidates", [])
+        sell_cands = historical_context.get("recommend_sell_candidates", [])
         parts += [
             "",
-            "## 推荐候选 + 方向汇总（精简）",
+            "## 推荐候选方向（Python 预筛选，已剔除「其他/待分类」）",
+            "买入推荐 / 卖出推荐 **只能**从下列候选方向中挑选（最多 3 个）：",
             "```json",
-            json.dumps(slim, ensure_ascii=False, indent=2, default=str),
+            _json.dumps(
+                {"buy_candidates": buy_cands, "sell_candidates": sell_cands},
+                ensure_ascii=False, indent=2, default=str,
+            ),
+            "```",
+        ]
+
+        parts += [
+            "",
+            "## 近7日历史对比数据",
+            "以下是前置 Python 聚合计算出的结构化历史对比数据（JSON），",
+            "请结合它判断「今日 vs 近7日」的相对强弱，不要只凭今日绝对金额下结论。",
+            "**禁止自行重算百分比 / 金额 / 方向。**",
+            "```json",
+            _json.dumps(historical_context, ensure_ascii=False, indent=2, default=str),
             "```",
         ]
 
@@ -284,6 +314,10 @@ _FORBIDDEN_KEYWORDS = [
     "expand_remaining",
     # 「其他/待分类」作方向名时禁止出现
     "其他/待分类",
+    # 推荐/趋势中禁止出现字段名标签（用户已要求删除）
+    "信号类型",
+    "置信度：",
+    "置信度:",
 ]
 
 
@@ -439,8 +473,6 @@ def build_structured_report(
                 "today_buy_amount": d["today"]["buy_amount"],
                 "avg_7d": d["last_7d"]["avg_daily_buy_amount"],
                 "change_pct": d["comparison"]["buy_amount_change_pct"],
-                "signal_type": d.get("signal_type", "-"),
-                "confidence": d.get("confidence", "-"),
             })
 
     # 推荐表
@@ -453,15 +485,11 @@ def build_structured_report(
                 "today_buy_kol_count": c.get("today_buy_kol_count", 0),
                 "today_buy_amount": c.get("today_buy_amount", 0),
                 "buy_change_pct": c.get("buy_amount_change_pct"),
-                "signal_type": c.get("signal_type", ""),
-                "confidence": c.get("confidence", ""),
             })
         for c in historical_context.get("recommend_sell_candidates", []):
             sell_recommend_table.append({
                 "direction": c["direction"],
                 "today_sell_kol_count": c.get("today_sell_kol_count", 0),
-                "signal_type": c.get("signal_type", ""),
-                "confidence": c.get("confidence", ""),
             })
 
     # 核心大V操作

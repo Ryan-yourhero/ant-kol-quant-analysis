@@ -58,3 +58,7 @@ PROJECT_STATUS.md
 # ===== 系统文件 =====
 Thumbs.db
 .DS_Store
+
+# ===== 临时调试脚本 =====
+_tmp_*.py
+keep_*.py

@@ -19,12 +19,13 @@ import re
 import sys
 import threading
 from datetime import datetime
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
+from src.parser.direction_classifier import is_other_direction  # noqa: E402
 from src.parser.models import TradeRecord  # noqa: E402
 
 logger = logging.getLogger("backend.report_service")
@@ -32,7 +33,9 @@ logger = logging.getLogger("backend.report_service")
 OUTPUT_DIR = os.path.join(BASE_DIR, "output")
 
 # ---- 线程安全状态（持久化到磁盘） ----
-_lock = threading.Lock()
+# 用 RLock：_run() 在 with _lock 块内会调用 _mark_date_status()，
+# 后者内部再次加锁；普通 Lock 不可重入，会在此死锁导致 /api/reports 永久阻塞。
+_lock = threading.RLock()
 _STATE_FILE = os.path.join(OUTPUT_DIR, "_report_state.json")
 
 
@@ -196,71 +199,151 @@ def load_records_from_excel(date_str: str) -> List[TradeRecord]:
 UNMAPPED_DIRECTION = "待确认"
 
 
-def inject_final_directions(records: List[TradeRecord]) -> None:
-    """为每条 record 写入 final direction / source / verified。
+def inject_final_directions(records: List[TradeRecord]) -> Dict[str, int]:
+    """为每条 record 写入 final direction / source / verified / confidence。
 
-    仅查 fund_direction_master，不调用 web_search / llm / keyword 分类。
-    未命中 → direction="待确认"，但记录本身不会被剔除。
+    这是基金方向的唯一解析入口，一次性解析并固化；后续 historical_context /
+    daily_report 只消费结果，禁止重新判断。
+
+    解析优先级：
+      1. fund_direction_master 精确匹配（normalized_name）
+      2. 截断名称安全前缀匹配（仅当原始名带 "..." / "…"）
+      3. direction_resolver.resolve_direction（rule → context → Tavily → LLM → 落库）
+      4. 仍未确定 → direction="待确认"
+
+    同一基金（normalized_name）只解析一次，结果缓存后回填所有 records，
+    避免同一天 20 条交易调用 20 次 Tavily。
+
+    Returns:
+        统计字典，供调用方记录/验证。
     """
     from backend.services import fund_direction_repo as repo
-    from src.storage.db_storage import _get_session
-    from src.storage.models import FundDirectionMaster
+    from backend.services import direction_resolver
 
-    # 收集唯一 (fund_name, normalized_name)
-    norm_set: set = set()
-    fund_names: List[str] = []
+    # 1) 收集唯一基金（按 normalized_name 去重）
+    unique: Dict[str, Dict[str, Optional[str]]] = {}
     for r in records:
         fn = (r.fund_name or "").strip()
         if not fn:
             continue
         norm = repo.normalize_fund_name(fn)
-        if norm and norm not in norm_set:
-            norm_set.add(norm)
-            fund_names.append(fn)
+        if not norm:
+            continue
+        if norm not in unique:
+            unique[norm] = {"fund_name": fn, "opinion_text": r.opinion_text}
+        elif not unique[norm]["opinion_text"] and r.opinion_text:
+            unique[norm]["opinion_text"] = r.opinion_text
 
-    # 批量查 DB
-    db_map: dict = {}
-    if norm_set:
-        session = _get_session()
-        try:
-            rows = (
-                session.query(FundDirectionMaster)
-                .filter(FundDirectionMaster.normalized_name.in_(list(norm_set)))
-                .all()
+    # 2) 批量精确查 DB
+    db_map: Dict[str, Any] = {}
+    if unique:
+        db_map = repo.lookup_many(list(unique.keys()))
+
+    # 3) 逐基金解析 + 缓存
+    cache: Dict[str, tuple] = {}
+    stats = {
+        "db_hit": 0,
+        "prefix_hit": 0,
+        "resolved": 0,
+        "web_search": 0,
+        "pending": 0,
+    }
+
+    for norm, meta in unique.items():
+        fn = meta["fund_name"]
+        snap = db_map.get(norm)
+
+        # ---- 1. DB 精确匹配（有效方向才直接采用）----
+        if snap and snap.direction and not is_other_direction(snap.direction):
+            cache[norm] = _finalize(
+                snap.direction,
+                snap.classification_source or "db",
+                bool(snap.verified),
+                snap.confidence or ("high" if snap.verified else "low"),
             )
-            for row in rows:
-                snap = repo._detach(row)
-                db_map[snap.normalized_name] = snap
-        finally:
-            session.close()
+            stats["db_hit"] += 1
+            continue
 
-    n_mapped = 0
-    n_unmapped = 0
+        # ---- 2. 截断名称安全前缀匹配 ----
+        prefix_snap = _safe_prefix_match(repo, fn, norm)
+        if prefix_snap is not None:
+            cache[norm] = _finalize(
+                prefix_snap.direction,
+                prefix_snap.classification_source or "db",
+                bool(prefix_snap.verified),
+                prefix_snap.confidence or ("high" if prefix_snap.verified else "low"),
+            )
+            stats["prefix_hit"] += 1
+            continue
+
+        # ---- 3. resolve_direction（rule → context → Tavily → LLM → 落库）----
+        result = direction_resolver.resolve_direction(
+            fn, meta["opinion_text"], fund_code=None, fund_type_hint=None
+        )
+        stats["resolved"] += 1
+        if result.source == "web_search":
+            stats["web_search"] += 1
+
+        if result.direction and not is_other_direction(result.direction):
+            verified = result.confidence in ("high", "medium")
+            cache[norm] = _finalize(
+                result.direction, result.source, verified, result.confidence
+            )
+        else:
+            cache[norm] = _finalize(UNMAPPED_DIRECTION, "unmapped", False, "low")
+            stats["pending"] += 1
+
+    # 4) 回填 records
     for r in records:
         fn = (r.fund_name or "").strip()
-        if not fn:
-            r.direction = UNMAPPED_DIRECTION
-            r.direction_source = "unmapped"
-            r.direction_verified = False
-            n_unmapped += 1
-            continue
-        norm = repo.normalize_fund_name(fn)
-        snap = db_map.get(norm) if norm else None
-        if snap and snap.direction:
-            r.direction = snap.direction
-            r.direction_source = snap.classification_source or "db"
-            r.direction_verified = bool(snap.verified)
-            n_mapped += 1
+        norm = repo.normalize_fund_name(fn) if fn else ""
+        if norm and norm in cache:
+            direction, source, verified, confidence = cache[norm]
         else:
-            r.direction = UNMAPPED_DIRECTION
-            r.direction_source = "unmapped"
-            r.direction_verified = False
-            n_unmapped += 1
+            direction, source, verified, confidence = (
+                UNMAPPED_DIRECTION, "unmapped", False, "low"
+            )
+        r.direction = direction
+        r.direction_source = source
+        r.direction_verified = verified
+        r.direction_confidence = confidence
 
     logger.info(
-        "方向注入完成: 命中 %d / 未命中 %d（未命中→%s，但交易保留）",
-        n_mapped, n_unmapped, UNMAPPED_DIRECTION,
+        "方向注入完成: DB命中 %d / 截断命中 %d / 自动补全 %d(其中web_search %d) / 待确认 %d",
+        stats["db_hit"], stats["prefix_hit"], stats["resolved"],
+        stats["web_search"], stats["pending"],
     )
+    return stats
+
+
+def _finalize(direction: str, source: str, verified: bool, confidence: str) -> tuple:
+    """规范化方向四元组，供回填。"""
+    return (direction, source, verified, confidence)
+
+
+def _safe_prefix_match(repo, fn: str, norm: str):
+    """截断基金名的安全前缀匹配。
+
+    规则：
+      1. 仅当原始 fund_name 明显带 "..." / "…" 时才允许 prefix matching
+      2. 只有 1 个候选 → 直接命中
+      3. 多个候选但 direction 完全一致 → 用共同 direction
+      4. 多个候选且 direction 不一致 → 不自动匹配（返回 None）
+    """
+    if "..." not in fn and "…" not in fn:
+        return None
+    candidates = repo.lookup_by_prefix(norm)
+    if not candidates:
+        return None
+    valid = [c for c in candidates if c.direction and not is_other_direction(c.direction)]
+    if not valid:
+        return None
+    if len(valid) == 1:
+        return valid[0]
+    dirs = {c.direction for c in valid}
+    if len(dirs) == 1:
+        return valid[0]
+    return None
 
 
 def _load_crawl_status(date_str: str) -> dict:

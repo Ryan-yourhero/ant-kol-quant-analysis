@@ -66,18 +66,14 @@
         <div class="modal-head">
           <span>{{ viewing.date }} 每日分析报告</span>
           <div style="display: flex; gap: 8px;">
-            <button class="btn btn-default btn-sm" @click="viewing.showMarkdown = !viewing.showMarkdown">
-              {{ viewing.showMarkdown ? '查看仪表盘' : '查看 Markdown' }}
-            </button>
             <button class="btn btn-default btn-sm" @click="viewing = null">关闭</button>
           </div>
         </div>
         <div class="report-content">
-          <div v-if="!viewing.structured && !viewing.showMarkdown" style="color: #909399; padding: 16px; text-align: center;">
+          <div v-if="!viewing.markdown" style="color: #909399; padding: 16px; text-align: center;">
             加载中...
           </div>
-          <ReportDashboard v-else-if="viewing.structured && !viewing.showMarkdown" :structured="viewing.structured" />
-          <pre v-else-if="viewing.showMarkdown" style="white-space: pre-wrap; font-family: inherit; line-height: 1.6; margin: 0; font-size: 13px;">{{ viewing.markdown }}</pre>
+          <div v-else class="markdown-body" v-html="viewingHtml"></div>
         </div>
       </div>
     </div>
@@ -255,14 +251,11 @@
 <script>
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { marked } from 'marked'
-import { startRun as apiStart, getCurrentRun, getTodayOps, downloadExcel, getReports, generateReports, getReportContent, getReportStructured, getOpsByDate } from '../utils/api.js'
+import { startRun as apiStart, getCurrentRun, getTodayOps, downloadExcel, getReports, generateReports, getReportContent, getOpsByDate } from '../utils/api.js'
 
 marked.setOptions({ breaks: true, gfm: true })
 
-import ReportDashboard from '../components/ReportDashboard.vue'
-
 export default {
-  components: { ReportDashboard },
   setup() {
     const status = ref({ status: 'idle', message: '' })
     const ops = ref([])
@@ -282,7 +275,7 @@ export default {
 
     const viewingHtml = computed(() => {
       if (!viewing.value) return ''
-      return marked.parse(viewing.value.content || '')
+      return marked.parse(viewing.value.markdown || '')
     })
 
     // 按方向分组：方向为空归到「其他/待分类」；组间按组内大V 数 + 操作数从高到低排序
@@ -419,26 +412,14 @@ export default {
     }
 
     function viewReport(item) {
-      // 打开弹窗，先加载结构化数据；如果结构化接口 404，再回退到 markdown
-      viewing.value = { date: item.date, showMarkdown: false, markdown: '', structured: null }
-      getReportStructured(item.date).then(r => {
+      // 打开弹窗，直接加载完整 Markdown 报告
+      viewing.value = { date: item.date, markdown: '' }
+      getReportContent(item.date).then(r => {
         if (r.data.ok) {
-          viewing.value = {
-            date: item.date,
-            showMarkdown: false,
-            markdown: (r.data.format === 'legacy') ? r.data.structured.summary : '',
-            structured: r.data.structured,
-          }
-          // 顺便缓存 markdown 内容（如果结构化接口是 legacy 模式，summary 即为完整 markdown）
-          if (r.data.format === 'legacy') {
-            getReportContent(item.date).then(mr => {
-              if (mr.data.ok && viewing.value && viewing.value.date === item.date) {
-                viewing.value.markdown = mr.data.content
-              }
-            }).catch(() => {})
+          if (viewing.value && viewing.value.date === item.date) {
+            viewing.value.markdown = r.data.content
           }
         } else {
-          alert(r.data.message)
           viewing.value = null
         }
       }).catch(() => {

@@ -118,6 +118,26 @@ def lookup_many(norm_names: List[str]) -> Dict[str, FundDirectionSnapshot]:
         session.close()
 
 
+def lookup_by_prefix(norm: str) -> List[FundDirectionSnapshot]:
+    """按 normalized_name 前缀查询（用于截断基金名的安全匹配）。
+
+    仅应由调用方在「原始 fund_name 明显带省略号」时调用，
+    避免对完整基金名做模糊前缀匹配导致误匹配。
+    """
+    if not norm:
+        return []
+    session = _get_session()
+    try:
+        rows = (
+            session.query(FundDirectionMaster)
+            .filter(FundDirectionMaster.normalized_name.like(norm + "%"))
+            .all()
+        )
+        return [_detach(r) for r in rows]
+    finally:
+        session.close()
+
+
 # ============================================================
 #  写入 / 更新
 # ============================================================

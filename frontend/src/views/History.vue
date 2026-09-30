@@ -65,18 +65,14 @@
         <div class="modal-head">
           <span>{{ viewingReport.date }} 每日分析报告</span>
           <div style="display: flex; gap: 8px;">
-            <button class="btn btn-default btn-sm" @click="viewingReport.showMarkdown = !viewingReport.showMarkdown">
-              {{ viewingReport.showMarkdown ? '查看仪表盘' : '查看 Markdown' }}
-            </button>
             <button class="btn btn-default btn-sm" @click="viewingReport = null">关闭</button>
           </div>
         </div>
         <div class="report-content">
-          <div v-if="!viewingReport.structured && !viewingReport.showMarkdown" style="color: #909399; padding: 16px; text-align: center;">
+          <div v-if="!viewingReport.markdown" style="color: #909399; padding: 16px; text-align: center;">
             加载中...
           </div>
-          <ReportDashboard v-else-if="viewingReport.structured && !viewingReport.showMarkdown" :structured="viewingReport.structured" />
-          <pre v-else-if="viewingReport.showMarkdown" style="white-space: pre-wrap; font-family: inherit; line-height: 1.6; margin: 0; font-size: 13px;">{{ viewingReport.markdown }}</pre>
+          <div v-else class="markdown-body" v-html="viewingHtml"></div>
         </div>
       </div>
     </div>
@@ -85,11 +81,12 @@
 
 <script>
 import { ref, computed, onMounted } from 'vue'
-import { getHistoryOps, getReportContent, getReportStructured } from '../utils/api.js'
-import ReportDashboard from '../components/ReportDashboard.vue'
+import { marked } from 'marked'
+import { getHistoryOps, getReportContent } from '../utils/api.js'
+
+marked.setOptions({ breaks: true, gfm: true })
 
 export default {
-  components: { ReportDashboard },
   setup() {
     const ops = ref([])
     const page = ref(1)
@@ -104,6 +101,11 @@ export default {
     const viewingReport = ref(null)
 
     const maxPage = computed(() => Math.max(1, Math.ceil(total.value / 20)))
+
+    const viewingHtml = computed(() => {
+      if (!viewingReport.value) return ''
+      return marked.parse(viewingReport.value.markdown || '')
+    })
 
     function load(p) {
       page.value = p || 1
@@ -136,24 +138,13 @@ export default {
         alert('请先选择日期（可用日期输入框）')
         return
       }
-      viewingReport.value = { date, showMarkdown: false, markdown: '', structured: null }
-      getReportStructured(date).then(r => {
+      viewingReport.value = { date, markdown: '' }
+      getReportContent(date).then(r => {
         if (r.data.ok) {
-          viewingReport.value = {
-            date,
-            showMarkdown: false,
-            markdown: (r.data.format === 'legacy') ? r.data.structured.summary : '',
-            structured: r.data.structured,
-          }
-          if (r.data.format === 'legacy') {
-            getReportContent(date).then(mr => {
-              if (mr.data.ok && viewingReport.value && viewingReport.value.date === date) {
-                viewingReport.value.markdown = mr.data.content
-              }
-            }).catch(() => {})
+          if (viewingReport.value && viewingReport.value.date === date) {
+            viewingReport.value.markdown = r.data.content
           }
         } else {
-          alert(r.data.message)
           viewingReport.value = null
         }
       }).catch(() => {
@@ -163,7 +154,7 @@ export default {
 
     onMounted(() => { load(1) })
 
-    return { ops, page, total, dateFrom, dateTo, kolName, opType, fundName, jumpPage, reportDate, viewingReport, maxPage, load, search, jumpToPage, openReport }
+    return { ops, page, total, dateFrom, dateTo, kolName, opType, fundName, jumpPage, reportDate, viewingReport, maxPage, viewingHtml, load, search, jumpToPage, openReport }
   }
 }
 </script>

@@ -826,10 +826,10 @@ class ScrollManager:
         # v3.4: DEBUG_VISIBLE 模式打印对比
         if DEBUG_VISIBLE and visible_nodes:
             # 统计 full DOM 中的展开按钮数（仅用于 DEBUG）
-            full_dom_expand = len(re.findall(r"展开今日全部\d+条操作", xml_content)) if xml_content else 0
+            full_dom_expand = len(re.findall(r"展开今日全部\d+条(?:操作|足迹)", xml_content)) if xml_content else 0
             visible_expand = len([
                 n for n in visible_nodes
-                if re.match(r"^展开今日全部\d+条操作$", n["text"])
+                if re.match(r"^展开今日全部\d+条(?:操作|足迹)$", n["text"])
             ])
             print(f"\n[DEBUG_VISIBLE]")
             print(f"  full_dom_text_nodes = {full_dom_text_nodes}")

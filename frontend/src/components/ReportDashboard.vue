@@ -83,7 +83,7 @@
     <div class="card-block">
       <h3>近 7 日趋势变化</h3>
       <table v-if="tables.trend_table && tables.trend_table.length">
-        <thead><tr><th>方向</th><th>今日人数</th><th>今日金额</th><th>7 日日均</th><th>变化幅度</th><th>信号类型</th><th>置信度</th></tr></thead>
+        <thead><tr><th>方向</th><th>今日人数</th><th>今日金额</th><th>7 日日均</th><th>变化幅度</th></tr></thead>
         <tbody>
           <tr v-for="r in tables.trend_table" :key="r.direction">
             <td>{{ r.direction }}</td>
@@ -91,8 +91,6 @@
             <td>{{ formatAmount(r.today_buy_amount) }}</td>
             <td>{{ formatAmount(r.avg_7d) }}</td>
             <td>{{ r.change_pct === null ? '—' : (r.change_pct > 0 ? '+' : '') + r.change_pct.toFixed(1) + '%' }}</td>
-            <td>{{ r.signal_type }}</td>
-            <td>{{ r.confidence }}</td>
           </tr>
         </tbody>
       </table>
@@ -103,7 +101,7 @@
     <div class="card-block">
       <h3>买入推荐</h3>
       <table v-if="tables.buy_recommend_table && tables.buy_recommend_table.length">
-        <thead><tr><th>排名</th><th>方向</th><th>今日买入人数</th><th>今日买入金额</th><th>近 7 日变化</th><th>信号类型</th><th>置信度</th></tr></thead>
+        <thead><tr><th>排名</th><th>方向</th><th>今日买入人数</th><th>今日买入金额</th><th>近 7 日变化</th></tr></thead>
         <tbody>
           <tr v-for="(r, idx) in tables.buy_recommend_table" :key="r.direction">
             <td>{{ idx + 1 }}</td>
@@ -111,8 +109,6 @@
             <td>{{ r.today_buy_kol_count }}</td>
             <td>{{ formatAmount(r.today_buy_amount) }}</td>
             <td>{{ r.buy_change_pct === null ? '—' : (r.buy_change_pct > 0 ? '+' : '') + r.buy_change_pct.toFixed(1) + '%' }}</td>
-            <td>{{ r.signal_type }}</td>
-            <td>{{ r.confidence }}</td>
           </tr>
         </tbody>
       </table>
@@ -123,14 +119,12 @@
     <div class="card-block">
       <h3>卖出推荐</h3>
       <table v-if="tables.sell_recommend_table && tables.sell_recommend_table.length">
-        <thead><tr><th>排名</th><th>方向</th><th>今日卖出人数</th><th>信号类型</th><th>置信度</th></tr></thead>
+        <thead><tr><th>排名</th><th>方向</th><th>今日卖出人数</th></tr></thead>
         <tbody>
           <tr v-for="(r, idx) in tables.sell_recommend_table" :key="r.direction">
             <td>{{ idx + 1 }}</td>
             <td>{{ r.direction }}</td>
             <td>{{ r.today_sell_kol_count }}</td>
-            <td>{{ r.signal_type }}</td>
-            <td>{{ r.confidence }}</td>
           </tr>
         </tbody>
       </table>

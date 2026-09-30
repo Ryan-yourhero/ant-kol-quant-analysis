@@ -40,13 +40,10 @@ from config.historical_config import (  # noqa: E402
     HISTORICAL_THRESHOLDS,
 )
 from src.parser.direction_classifier import (  # noqa: E402
-    classify_records,
     is_other_direction,
-    OTHER_DIRECTION,
     ClassificationResult,
 )
 from src.parser.models import TradeRecord  # noqa: E402
-from .direction_resolver import resolve_records  # noqa: E402
 
 
 def _build_classifications_from_records(records: List[TradeRecord]) -> List[ClassificationResult]:
@@ -61,7 +58,7 @@ def _build_classifications_from_records(records: List[TradeRecord]) -> List[Clas
         direction = getattr(r, "direction", None) or "待确认"
         source = getattr(r, "direction_source", None) or "unmapped"
         verified = bool(getattr(r, "direction_verified", False))
-        confidence = "high" if verified else "low"
+        confidence = getattr(r, "direction_confidence", None) or ("high" if verified else "low")
         evidence = f"DB 主库: {direction}" if source != "unmapped" else "未命中主库"
         out.append(ClassificationResult(
             direction=direction,
@@ -739,17 +736,10 @@ def build(
 
     ad = _parse_date(analysis_date)
 
-    # ---- 1. 固化今日 direction（Source of Truth）----
-    # 优先使用 record.direction（由 report_service.inject_final_directions 从 fund_direction_master 注入）；
-    # 若 record 未注入（legacy 调用方），则回退到 direction_resolver。
-    # 报告路径下 record.direction 必定已存在，因此不会再触发 rule / context / web_search。
+    # ---- 1. 读取今日 direction（已由 report_service.inject_final_directions 固化）----
+    # direction 的唯一解析入口是 report_service；这里只读取，不重新分类，
+    # 避免方向解析发生得太晚、上下游数据不一致。
     today_classifications = _build_classifications_from_records(today_records)
-    if any(c.source in ("unknown", "rule", "llm", "web_search") for c in today_classifications):
-        # 仅在出现非 DB 来源时才尝试联网补全（保留人工分类兜底）
-        try:
-            today_classifications = resolve_records(today_records)
-        except Exception as e:  # noqa: BLE001
-            logger.warning("direction_resolver 失败: %s", e)
 
     # ---- 2. 今日聚合（同源）----
     kol_today, direction_today, _, per_record = _aggregate_today(today_records, today_classifications)

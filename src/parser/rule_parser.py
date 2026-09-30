@@ -364,7 +364,7 @@ def _parse_post(lines: List[str], start: int, end: int, kol_name: str) -> List[D
     # 提取"展开今日全部N条操作" → today_operation_count
     today_op_count = None
     for line in post_lines:
-        m = re.search(r"展开今日全部(\d+)条操作", line)
+        m = re.search(r"展开今日全部(\d+)条(?:操作|足迹)", line)
         if m:
             today_op_count = m.group(1)
             break

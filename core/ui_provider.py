@@ -356,7 +356,7 @@ def validate_provider(
                 visible_n.append(vn_count)
                 exp_btns = [
                     n for n in vn
-                    if re.match(r"^展开今日全部\d+条操作$", n.get("text", ""))
+                    if re.match(r"^展开今日全部\d+条(?:操作|足迹)$", n.get("text", ""))
                     and n.get("clickable")
                 ]
                 exp_count = len(exp_btns)
