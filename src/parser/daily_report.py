@@ -74,9 +74,9 @@ DAILY_REPORT_SYSTEM_PROMPT = """一、角色
 ### 一、今日总体判断
 （开头注明：今日共采集 X 位大V、Y 条操作记录，具体数字从「今日采集概况」引用。行情描述必须标注来源，如"从采集到的大V观点看……"。）
 ### 二、方向汇总
-（从输入 directions 引用，按今日人数从高到低排序；direction 必须在 allowed_directions 内。）
+（**必须原样使用下方"方向汇总表（Python 预生成 Markdown 表格）"块里的 Markdown 表格，禁止改写为项目符号列表或段落，禁止新增/删除/合并列，禁止修改列顺序，禁止增删任何行**。表格已经按今日人数从高到低、人数相同按买入金额从高到低排序好了。direction 必须在 allowed_directions 内。状态列填"弱共识" / "共识" / "分歧" / "个体行为"，由你按方向×大V维度判断；但**表格整体（包括行数和列）必须原样使用**。）
 ### 三、近7日趋势变化
-（大V×方向口径；direction 必须在 allowed_directions 内。）
+（**必须原样使用下方"近7日趋势表（Python 预生成 Markdown 表格）"块里的 Markdown 表格，禁止改写为项目符号列表或段落，禁止新增/删除/合并列，禁止修改列顺序，禁止增删任何行**。direction 必须在 allowed_directions 内。解读列填 1~2 句自然语言描述今日与近7日的相对强弱；**表格其他列与行顺序必须原样使用**。）
 ### 四、买入推荐
 （最多 3 个；方向必须来自 buy_candidates。）
 ### 五、卖出推荐
@@ -144,6 +144,123 @@ def records_to_markdown(records: List[TradeRecord]) -> str:
 #  主流程
 # ============================================================
 
+def _render_trend_table_markdown(historical_context: Optional[dict]) -> str:
+    """渲染近7日趋势 Markdown 表格：今日 vs 近7日日均对比 + 环比。
+
+    列：方向 | 今日买入人数 | 今日买入金额（元） | 近7日日均买入金额（元） | 环比变化 | 解读
+    「解读」列留空，由 LLM 在「三、近7日趋势变化」段按规则填 1~2 句自然语言。
+    LLM 不得修改其他列与行顺序。
+    """
+    if not historical_context:
+        return "（无历史上下文，无法生成趋势表）"
+
+    directions_ctx = historical_context.get("directions") or []
+    if not directions_ctx:
+        return "（无方向历史数据，无法生成趋势表）"
+
+    rows = []
+    for d in directions_ctx:
+        today = d.get("today", {}) or {}
+        last7 = d.get("last_7d", {}) or {}
+        comp = d.get("comparison", {}) or {}
+        rows.append({
+            "direction": d.get("direction", ""),
+            "today_kol_count": today.get("buy_kol_count", 0),
+            "today_buy_amount": round(float(today.get("buy_amount") or 0), 2),
+            "avg_7d": round(float(last7.get("avg_daily_buy_amount") or 0), 2),
+            "change_pct": comp.get("buy_amount_change_pct"),
+        })
+
+    # 排序：先按今日买入人数倒序，再按今日买入金额倒序
+    rows.sort(key=lambda r: (-int(r["today_kol_count"] or 0), -float(r["today_buy_amount"] or 0)))
+
+    lines = [
+        "| 方向 | 今日买入人数 | 今日买入金额（元） | 近7日日均买入金额（元） | 环比变化 | 解读 |",
+        "|---|---|---|---|---|---|",
+    ]
+    for r in rows:
+        change = r["change_pct"]
+        if change is None:
+            change_str = "-"
+        elif change == 0 or abs(change) < 0.05:
+            change_str = "持平"
+        else:
+            sign = "上升" if change > 0 else "下降"
+            change_str = f"{sign} {abs(change):.1f}%"
+        today_amt = f"{r['today_buy_amount']:.2f}" if r["today_buy_amount"] else "-"
+        avg_amt = f"{r['avg_7d']:.2f}" if r["avg_7d"] else "-"
+        lines.append(
+            f"| {r['direction']} | {r['today_kol_count']} | {today_amt} | {avg_amt} | {change_str} |  |"
+        )
+
+    return "\n".join(lines)
+
+
+def _render_direction_summary_table(records: List[TradeRecord]) -> str:
+    """渲染方向汇总 Markdown 表格：按今日买入人数倒序、人数相同按买入金额倒序。
+
+    列：方向 | 今日买入人数 | 今日买入金额（元） | 今日卖出人数 | 今日卖出份额（份） | 状态
+    「状态」列留空，由 LLM 在「二、方向汇总」段按规则（弱共识/共识/分歧/个体行为）填写。
+    LLM 不得修改其他列与行顺序。
+    """
+    by_buy_kols: Dict[str, set] = {}
+    by_buy_amount: Dict[str, float] = {}
+    by_sell_kols: Dict[str, set] = {}
+    by_sell_shares: Dict[str, float] = {}
+
+    for r in records:
+        d = getattr(r, "direction", None) or "待确认"
+        if d in ("待确认", "其他/待分类"):
+            continue
+        ot = (r.operation_type or "").strip()
+        remark = (r.remark or "").strip()
+        kol = (r.kol_name or "").strip() or "未知"
+        if ot in ("买入", "定投"):
+            if remark == "转换":
+                continue  # 转换转入不计入买入人数/金额汇总
+            by_buy_kols.setdefault(d, set()).add(kol)
+            try:
+                amt = float(r.buy_amount or 0)
+            except (TypeError, ValueError):
+                amt = 0.0
+            by_buy_amount[d] = by_buy_amount.get(d, 0.0) + amt
+        elif ot == "卖出":
+            if remark == "转换":
+                continue  # 转换转出不计入卖出汇总
+            by_sell_kols.setdefault(d, set()).add(kol)
+            try:
+                shares = float(r.sell_shares or 0)
+            except (TypeError, ValueError):
+                shares = 0.0
+            by_sell_shares[d] = by_sell_shares.get(d, 0.0) + shares
+
+    directions = sorted(
+        set(by_buy_kols.keys()) | set(by_sell_kols.keys()),
+        key=lambda d: (
+            -len(by_buy_kols.get(d, set())),
+            -by_buy_amount.get(d, 0.0),
+        ),
+    )
+
+    lines = [
+        "| 方向 | 今日买入人数 | 今日买入金额（元） | 今日卖出人数 | 今日卖出份额（份） | 状态 |",
+        "|---|---|---|---|---|---|",
+    ]
+    for d in directions:
+        buy_n = len(by_buy_kols.get(d, set()))
+        buy_amt = round(by_buy_amount.get(d, 0.0), 2)
+        sell_n = len(by_sell_kols.get(d, set()))
+        sell_sh = round(by_sell_shares.get(d, 0.0), 2)
+        # 卖出份额以整数显示，无小数
+        sell_sh_str = str(int(sell_sh)) if sell_sh and sell_sh.is_integer() else (f"{sell_sh:g}" if sell_sh else "-")
+        buy_amt_str = f"{buy_amt:.2f}" if buy_amt else "-"
+        lines.append(
+            f"| {d} | {buy_n} | {buy_amt_str} | {sell_n} | {sell_sh_str} |  |"
+        )
+
+    return "\n".join(lines)
+
+
 def generate_daily_report(
     records: List[TradeRecord],
     historical_context: Optional[dict] = None,
@@ -166,6 +283,11 @@ def generate_daily_report(
 
     kol_names = {r.kol_name for r in records if r.kol_name}
     kol_count = len(kol_names)
+
+    # ---- 预生成方向汇总表（Python 已聚合，LLM 仅补"状态"列，禁止改写） ----
+    direction_table_md = _render_direction_summary_table(records)
+    # ---- 预生成近7日趋势表（Python 已聚合，LLM 仅补"解读"列，禁止改写） ----
+    trend_table_md = _render_trend_table_markdown(historical_context)
 
     # 抽取每笔 direction 来源（来自 historical_context.consistency_check 中
     # 隐含的 per_record；若未传则需要上游 build 时已固化）
@@ -195,6 +317,12 @@ def generate_daily_report(
         "",
         "## 今日原始数据表（含「投资方向」列 — 每笔交易的最终方向已固化）",
         table,
+        "",
+        "## 方向汇总表（Python 预生成 Markdown 表格 — 报告「二、方向汇总」必须原样使用）",
+        direction_table_md,
+        "",
+        "## 近7日趋势表（Python 预生成 Markdown 表格 — 报告「三、近7日趋势变化」必须原样使用）",
+        trend_table_md,
         "",
         "## 每笔交易的方向归属（Source of Truth）",
         *per_record_lines,
@@ -440,13 +568,16 @@ def build_structured_report(
         kol_set = kols.setdefault(kol, {"ops": 0, "buy": 0, "sell": 0})
         kol_set["ops"] += 1
 
-    # 方向汇总表
+    # 方向汇总表（统一排序：先按今日买入人数倒序，相同时按今日买入金额倒序）
+    direction_rank_key = lambda d: (
+        -len(by_direction_people.get(d, set())),
+        -by_direction_amount.get(d, 0.0),
+    )
     direction_people_table = sorted(
         [
             {"rank": i + 1, "direction": d, "kol_count": len(by_direction_people[d])}
             for i, d in enumerate(
-                sorted(by_direction_people.keys(),
-                       key=lambda x: (-len(by_direction_people[x]), -by_direction_amount.get(x, 0.0)))
+                sorted(by_direction_people.keys(), key=direction_rank_key)
             )
         ],
         key=lambda d: d["rank"],
@@ -457,7 +588,7 @@ def build_structured_report(
             {"rank": i + 1, "direction": d, "buy_amount": round(by_direction_amount.get(d, 0.0), 2),
              "main_kols": ", ".join(sorted(by_direction_people[d]))}
             for i, d in enumerate(
-                sorted(by_direction_amount.keys(), key=lambda x: -by_direction_amount[x])
+                sorted(by_direction_amount.keys(), key=direction_rank_key)
             )
         ],
         key=lambda d: d["rank"],
